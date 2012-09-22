@@ -132,6 +132,30 @@ cmd_prog(int nargs, char **args)
 	return common_prog(nargs, args);
 }
 
+static
+int
+cmd_setdbflags(int nargs, char **args)
+{
+    if (nargs < 3) {
+        kprintf("Usage: df nr on/off");
+        return EINVAL;
+    }
+
+    int flag = atoi(args[1]);
+    int isON = strcmp("on", args[2]) == 0;
+
+    if(flag < 1 || flag > 12) {
+        kprintf("nr is out of rang.");
+    } else if (isON){
+        flag = 1 << (flag - 1);
+        dbflags |= flag;
+    } else {
+        flag = ~(1 << (flag - 1));
+        dbflags &= flag;
+    }
+
+    return 0;
+}
 /*
  * Command for starting the system shell.
  */
@@ -379,6 +403,7 @@ showmenu(const char *name, const char *x[])
 static const char *opsmenu[] = {
 	"[s]       Shell                     ",
 	"[p]       Other program             ",
+    "[dbflags] Debug flag Debug flagss",
 	"[mount]   Mount a filesystem        ",
 	"[unmount] Unmount a filesystem      ",
 	"[bootfs]  Set \"boot\" filesystem     ",
@@ -402,6 +427,33 @@ cmd_opsmenu(int n, char **a)
 	return 0;
 }
 
+static const char *debugmenu[] = {
+    "[df 1 on/off]        DB_LOCORE      ",
+    "[df 2 on/off]        DB_SYSCALL     ",
+    "[df 3 on/off]        DB_INTERRUPT   ",
+    "[df 4 on/off]        DB_DEVICE      ",
+    "[df 5 on/off]        DB_THREADS     ",
+    "[df 6 on/off]        DB_VM          ",
+    "[df 7 on/off]        DB_EXEC        ",
+    "[df 8 on/off]        DB_VFS         ",
+    "[df 9 on/off]        DB_SFS         ",
+    "[df 10 on/off]       DB_NET         ",
+    "[df 11 on/off]       DB_NETFS       ",
+    "[df 12 on/off]       DB_KMALLOC     ",
+    NULL
+};
+
+static
+int
+cmd_dfmenu(int n, char **a){
+    	
+	(void)n;
+    (void)a;
+
+    showmenu("OS/161 Debug flags", debugmenu);
+    kprintf("Current value of dbflags is 0x%x\n", dbflags);
+    return 0;
+}
 static const char *testmenu[] = {
 	"[at]  Array test                    ",
 	"[bt]  Bitmap test                   ",
@@ -480,10 +532,12 @@ static struct {
 	{ "help",	cmd_mainmenu },
 	{ "?o",		cmd_opsmenu },
 	{ "?t",		cmd_testmenu },
+    { "dbflags",cmd_dfmenu},
 
 	/* operations */
 	{ "s",		cmd_shell },
 	{ "p",		cmd_prog },
+    { "df",     cmd_setdbflags },
 	{ "mount",	cmd_mount },
 	{ "unmount",	cmd_unmount },
 	{ "bootfs",	cmd_bootfs },
