@@ -32,7 +32,7 @@ HOST_LIBS=
 # This must be an absolute path, because it is used from different
 # levels of the source tree.
 #
-OSTREE=/homes/y/yanjunli/ece344/root
+OSTREE=~/ece344/root
 
 #
 # Name of the platform we're building OS/161 to run on.

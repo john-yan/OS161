@@ -159,7 +159,7 @@ int
 kmain(char *arguments)
 {
 	boot();
-
+    hello();
 	menu(arguments);
 
 	/* Should not get here */

@@ -208,6 +208,6 @@ void clocksleep(int seconds);
 
 #define DIVROUNDUP(a,b) (((a)+(b)-1)/(b))
 #define ROUNDUP(a,b)    (DIVROUNDUP(a,b)*b)
-
+void hello();
 
 #endif /* _LIB_H_ */
