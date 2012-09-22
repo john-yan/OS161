@@ -35,3 +35,4 @@ tags
 # Directories to ignore (do not add trailing '/'s, they skip symlinks).
 #==============================================================================#
 /root
+/os161/kern/compile
