@@ -31,8 +31,14 @@ tags
 #==============================================================================#
 /os161-1.11.tar.gz
 /svn-setup.sh
+/os161/defs.mk
+/os161/lib/hostcompat/libhostcompat.ha
+/os161/lib/libc/syscalls.S
 #==============================================================================#
 # Directories to ignore (do not add trailing '/'s, they skip symlinks).
 #==============================================================================#
 /root
 /os161/kern/compile
+/os161/testbin
+/os161/sbin
+/os161/bin
