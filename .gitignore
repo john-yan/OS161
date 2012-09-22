@@ -17,6 +17,7 @@
 *.pyc
 # vim swap files
 .*.swp
+*.vim
 # svn files
 .svn*
 # lib files
