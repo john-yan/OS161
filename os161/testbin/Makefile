@@ -4,6 +4,7 @@
 
 include ../defs.mk
 
+MAKE = make -j8 
 all depend tags clean install:
 	(cd add && $(MAKE) $@)
 	(cd argtest && $(MAKE) $@)
@@ -43,6 +44,7 @@ all depend tags clean install:
 	(cd malloctest && $(MAKE) $@)
 	(cd forkexecbomb && $(MAKE) $@)
 	(cd stacktest && $(MAKE) $@)
+	(cd printchar && $(MAKE) $@)
 
 # But not:
 #    malloctest     (no malloc/free until you write it)

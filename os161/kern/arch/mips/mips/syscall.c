@@ -69,9 +69,13 @@ mips_syscall(struct trapframe *tf)
 
 	switch (callno) {
 	    case SYS_reboot:
-		err = sys_reboot(tf->tf_a0);
-		break;
+		    err = sys_reboot(tf->tf_a0);
+		    break;
 
+        case SYS_printchar:
+            err = 0;
+            kprintf("%c", tf->tf_a0);
+            break;
 	    /* Add stuff here */
  
 	    default:

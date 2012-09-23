@@ -95,6 +95,7 @@ int read(int filehandle, void *buf, size_t size);
 int write(int filehandle, const void *buf, size_t size);
 int close(int filehandle);
 int reboot(int code);
+int printchar(int ch);
 int sync(void);
 /* mkdir - see sys/stat.h */
 int rmdir(const char *dirname);
