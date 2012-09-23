@@ -3,6 +3,7 @@
  */
 
 #include <unistd.h>
+#include <stdio.h>
 
 #define HW "Hello World!\n"
 static char* str = HW;
@@ -14,6 +15,7 @@ int main(void)
         printchar(str[i]);
     }
 
+    printf(HW);
     return 0;
 }
 

@@ -13,7 +13,7 @@ putchar(int ch)
 {
 	char c = ch;
 	int len;
-	len = write(STDOUT_FILENO, &c, 1);
+	len = printchar(c);//write(STDOUT_FILENO, &c, 1);
 	if (len<=0) {
 		return EOF;
 	}
