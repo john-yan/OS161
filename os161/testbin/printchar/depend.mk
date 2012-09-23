@@ -6,10 +6,5 @@ printchar.o: \
  $(OSTREE)/include/machine/types.h \
  $(OSTREE)/include/kern/types.h \
  $(OSTREE)/include/kern/unistd.h \
- $(OSTREE)/include/kern/ioctl.h \
- $(OSTREE)/include/string.h \
- $(OSTREE)/include/stdlib.h \
- $(OSTREE)/include/stdio.h \
- $(OSTREE)/include/stdarg.h \
- $(OSTREE)/include/err.h
+ $(OSTREE)/include/kern/ioctl.h
 
