@@ -4,7 +4,7 @@
 
 include ../defs.mk
 
-MAKE = make -j8 
+MAKE = make -j4 
 all depend tags clean install:
 	(cd add && $(MAKE) $@)
 	(cd argtest && $(MAKE) $@)
