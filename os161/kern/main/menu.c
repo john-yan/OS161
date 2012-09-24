@@ -142,10 +142,26 @@ cmd_setdbflags(int nargs, char **args)
     }
 
     int flag = atoi(args[1]);
-    int isON = strcmp("on", args[2]) == 0;
+    char str[20];
+    snprintf(str, 20, "%d",flag);
+    if (strcmp(str, args[1]) != 0){
+        kprintf("Usage: df nr on/off");
+        return EINVAL;
+    }
+
+    int isON;
+    if (strcmp("on", args[2]) == 0){
+        isON = 1;
+    } else if (strcmp("off", args[2]) == 0){
+        isON = 0;
+    } else {
+        kprintf("Usage: df nr on/off");
+        return EINVAL;
+    }
 
     if(flag < 1 || flag > 12) {
-        kprintf("nr is out of rang.");
+        kprintf("Usage: df nr on/off");
+        return EINVAL;
     } else if (isON){
         flag = 1 << (flag - 1);
         dbflags |= flag;
