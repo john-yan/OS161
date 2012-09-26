@@ -15,7 +15,7 @@ int main(void)
         printchar(str[i]);
     }
 
-    printf(HW);
+    printf("Hello printf!\n");
     return 0;
 }
 
