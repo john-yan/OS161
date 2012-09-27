@@ -1,0 +1,288 @@
+Index: kern/include/lib.h
+===================================================================
+--- kern/include/lib.h	(.../asst0-start)	(revision 6)
++++ kern/include/lib.h	(.../asst0-end)	(revision 6)
+@@ -208,6 +208,6 @@
+ 
+ #define DIVROUNDUP(a,b) (((a)+(b)-1)/(b))
+ #define ROUNDUP(a,b)    (DIVROUNDUP(a,b)*b)
++void hello();
+ 
+-
+ #endif /* _LIB_H_ */
+Index: kern/include/kern/callno.h
+===================================================================
+--- kern/include/kern/callno.h	(.../asst0-start)	(revision 6)
++++ kern/include/kern/callno.h	(.../asst0-end)	(revision 6)
+@@ -40,6 +40,7 @@
+ #define SYS___getcwd     29
+ #define SYS_stat         30
+ #define SYS_lstat        31
++#define SYS_printchar    32
+ /*CALLEND*/
+ 
+ 
+Index: kern/main/hello.c
+===================================================================
+--- kern/main/hello.c	(.../asst0-start)	(revision 0)
++++ kern/main/hello.c	(.../asst0-end)	(revision 6)
+@@ -0,0 +1,5 @@
++
++void hello()
++{
++    kprintf("Hello World\n");
++}
+Index: kern/main/main.c
+===================================================================
+--- kern/main/main.c	(.../asst0-start)	(revision 6)
++++ kern/main/main.c	(.../asst0-end)	(revision 6)
+@@ -159,7 +159,7 @@
+ kmain(char *arguments)
+ {
+ 	boot();
+-
++    hello();
+ 	menu(arguments);
+ 
+ 	/* Should not get here */
+Index: kern/main/menu.c
+===================================================================
+--- kern/main/menu.c	(.../asst0-start)	(revision 6)
++++ kern/main/menu.c	(.../asst0-end)	(revision 6)
+@@ -132,6 +132,46 @@
+ 	return common_prog(nargs, args);
+ }
+ 
++static
++int
++cmd_setdbflags(int nargs, char **args)
++{
++    if (nargs < 3) {
++        kprintf("Usage: df nr on/off");
++        return EINVAL;
++    }
++
++    int flag = atoi(args[1]);
++    char str[20];
++    snprintf(str, 20, "%d",flag);
++    if (strcmp(str, args[1]) != 0){
++        kprintf("Usage: df nr on/off");
++        return EINVAL;
++    }
++
++    int isON;
++    if (strcmp("on", args[2]) == 0){
++        isON = 1;
++    } else if (strcmp("off", args[2]) == 0){
++        isON = 0;
++    } else {
++        kprintf("Usage: df nr on/off");
++        return EINVAL;
++    }
++
++    if(flag < 1 || flag > 12) {
++        kprintf("Usage: df nr on/off");
++        return EINVAL;
++    } else if (isON){
++        flag = 1 << (flag - 1);
++        dbflags |= flag;
++    } else {
++        flag = ~(1 << (flag - 1));
++        dbflags &= flag;
++    }
++
++    return 0;
++}
+ /*
+  * Command for starting the system shell.
+  */
+@@ -379,6 +419,7 @@
+ static const char *opsmenu[] = {
+ 	"[s]       Shell                     ",
+ 	"[p]       Other program             ",
++    "[dbflags] Debug flags",
+ 	"[mount]   Mount a filesystem        ",
+ 	"[unmount] Unmount a filesystem      ",
+ 	"[bootfs]  Set \"boot\" filesystem     ",
+@@ -402,6 +443,33 @@
+ 	return 0;
+ }
+ 
++static const char *debugmenu[] = {
++    "[df 1 on/off]        DB_LOCORE      ",
++    "[df 2 on/off]        DB_SYSCALL     ",
++    "[df 3 on/off]        DB_INTERRUPT   ",
++    "[df 4 on/off]        DB_DEVICE      ",
++    "[df 5 on/off]        DB_THREADS     ",
++    "[df 6 on/off]        DB_VM          ",
++    "[df 7 on/off]        DB_EXEC        ",
++    "[df 8 on/off]        DB_VFS         ",
++    "[df 9 on/off]        DB_SFS         ",
++    "[df 10 on/off]       DB_NET         ",
++    "[df 11 on/off]       DB_NETFS       ",
++    "[df 12 on/off]       DB_KMALLOC     ",
++    NULL
++};
++
++static
++int
++cmd_dfmenu(int n, char **a){
++    	
++	(void)n;
++    (void)a;
++
++    showmenu("OS/161 Debug flags", debugmenu);
++    kprintf("Current value of dbflags is 0x%x\n", dbflags);
++    return 0;
++}
+ static const char *testmenu[] = {
+ 	"[at]  Array test                    ",
+ 	"[bt]  Bitmap test                   ",
+@@ -480,10 +548,12 @@
+ 	{ "help",	cmd_mainmenu },
+ 	{ "?o",		cmd_opsmenu },
+ 	{ "?t",		cmd_testmenu },
++    { "dbflags",cmd_dfmenu},
+ 
+ 	/* operations */
+ 	{ "s",		cmd_shell },
+ 	{ "p",		cmd_prog },
++    { "df",     cmd_setdbflags },
+ 	{ "mount",	cmd_mount },
+ 	{ "unmount",	cmd_unmount },
+ 	{ "bootfs",	cmd_bootfs },
+Index: kern/conf/conf.kern
+===================================================================
+--- kern/conf/conf.kern	(.../asst0-start)	(revision 6)
++++ kern/conf/conf.kern	(.../asst0-end)	(revision 6)
+@@ -372,6 +372,7 @@
+ 
+ file      main/main.c
+ file      main/menu.c
++file      main/hello.c
+ 
+ #
+ # User-level programming/system call support
+Index: kern/arch/mips/mips/syscall.c
+===================================================================
+--- kern/arch/mips/mips/syscall.c	(.../asst0-start)	(revision 6)
++++ kern/arch/mips/mips/syscall.c	(.../asst0-end)	(revision 6)
+@@ -69,15 +69,19 @@
+ 
+ 	switch (callno) {
+ 	    case SYS_reboot:
+-		err = sys_reboot(tf->tf_a0);
+-		break;
++            err = sys_reboot(tf->tf_a0);
++            break;
+ 
++        case SYS_printchar:
++            err = 0;
++            kprintf("%c", tf->tf_a0);
++            break;
+ 	    /* Add stuff here */
+  
+ 	    default:
+-		kprintf("Unknown syscall %d\n", callno);
+-		err = ENOSYS;
+-		break;
++            kprintf("Unknown syscall %d\n", callno);
++            err = ENOSYS;
++            break;
+ 	}
+ 
+ 
+Index: include/unistd.h
+===================================================================
+--- include/unistd.h	(.../asst0-start)	(revision 6)
++++ include/unistd.h	(.../asst0-end)	(revision 6)
+@@ -95,6 +95,7 @@
+ int write(int filehandle, const void *buf, size_t size);
+ int close(int filehandle);
+ int reboot(int code);
++int printchar(int ch);
+ int sync(void);
+ /* mkdir - see sys/stat.h */
+ int rmdir(const char *dirname);
+Index: lib/libc/putchar.c
+===================================================================
+--- lib/libc/putchar.c	(.../asst0-start)	(revision 6)
++++ lib/libc/putchar.c	(.../asst0-end)	(revision 6)
+@@ -13,7 +13,7 @@
+ {
+ 	char c = ch;
+ 	int len;
+-	len = write(STDOUT_FILENO, &c, 1);
++	len = printchar(c);//write(STDOUT_FILENO, &c, 1);
+ 	if (len<=0) {
+ 		return EOF;
+ 	}
+Index: testbin/printchar/depend.mk
+===================================================================
+--- testbin/printchar/depend.mk	(.../asst0-start)	(revision 0)
++++ testbin/printchar/depend.mk	(.../asst0-end)	(revision 6)
+@@ -0,0 +1,12 @@
++
++printchar.o: \
++ printchar.c \
++ $(OSTREE)/include/unistd.h \
++ $(OSTREE)/include/sys/types.h \
++ $(OSTREE)/include/machine/types.h \
++ $(OSTREE)/include/kern/types.h \
++ $(OSTREE)/include/kern/unistd.h \
++ $(OSTREE)/include/kern/ioctl.h \
++ $(OSTREE)/include/stdio.h \
++ $(OSTREE)/include/stdarg.h
++
+Index: testbin/printchar/printchar.c
+===================================================================
+--- testbin/printchar/printchar.c	(.../asst0-start)	(revision 0)
++++ testbin/printchar/printchar.c	(.../asst0-end)	(revision 6)
+@@ -0,0 +1,21 @@
++/*
++ * implement to test the printchar system call
++ */
++
++#include <unistd.h>
++#include <stdio.h>
++
++#define HW "Hello world!\n"
++static char* str = HW;
++
++int main(void)
++{
++    int i;
++    for(i = 0; i < sizeof(HW); i++){
++        printchar(str[i]);
++    }
++
++    printf("Hello printf!\n");
++    return 0;
++}
++
+Index: testbin/printchar/Makefile
+===================================================================
+--- testbin/printchar/Makefile	(.../asst0-start)	(revision 0)
++++ testbin/printchar/Makefile	(.../asst0-end)	(revision 6)
+@@ -0,0 +1,9 @@
++# Makefile for printchar
++
++SRCS=printchar.c
++PROG=printchar
++BINDIR=/testbin
++
++include ../../defs.mk
++include ../../mk/prog.mk
++
+Index: testbin/Makefile
+===================================================================
+--- testbin/Makefile	(.../asst0-start)	(revision 6)
++++ testbin/Makefile	(.../asst0-end)	(revision 6)
+@@ -43,6 +43,7 @@
+ 	(cd malloctest && $(MAKE) $@)
+ 	(cd forkexecbomb && $(MAKE) $@)
+ 	(cd stacktest && $(MAKE) $@)
++	(cd printchar && $(MAKE) $@)
+ 
+ # But not:
+ #    malloctest     (no malloc/free until you write it)
