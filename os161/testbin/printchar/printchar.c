@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <stdio.h>
 
-#define HW "Hello World!\n"
+#define HW "Hello world!\n"
 static char* str = HW;
 
 int main(void)
