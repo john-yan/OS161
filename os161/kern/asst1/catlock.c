@@ -52,6 +52,8 @@
  */
 
 /* who should be "cat" or "mouse" */
+/*
+ * comment out to avoid multiple definition
 void
 eat(const char *who, int num, int iteration)
 {
@@ -59,6 +61,7 @@ eat(const char *who, int num, int iteration)
         clocksleep(1);
         kprintf("%s: %d ends eating: %d\n", who, num, iteration);
 }
+*/
 
 /*
  * catlock()

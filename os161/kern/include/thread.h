@@ -82,19 +82,24 @@ void thread_yield(void);
  * address is treated as a key and is not interpreted or dereferenced.
  * Interrupts must be disabled.
  */
-void thread_sleep(const void *addr);
+void thread_sleep(const struct queue *addr);
 
 /*
- * Cause all threads sleeping on the specified address to wake up.
+ * Cause one thread sleeping on the specified address to wake up.
  * Interrupts must be disabled.
  */
-void thread_wakeup(const void *addr);
+void thread_wakeup(const struct queue *addr);
+
+/*
+ * Cause all threads being waked up.
+ */
+void thread_wakeupAll(const struct queue *addr);
 
 /*
  * Return nonzero if there are any threads sleeping on the specified
  * address. Meant only for diagnostic purposes.
  */
-int thread_hassleepers(const void *addr);
+int thread_hassleepers(const struct queue *addr);
 
 
 /*

@@ -114,6 +114,13 @@ lock_create(const char *name)
 		return NULL;
 	}
 	
+    lock->holdingThread = NULL;
+    lock->waitqueue = q_create(1);
+    if (lock->waitqueue == NULL) {
+        kfree(lock->name);
+        kfree(lock);
+        return NULL;
+    }
 	// add stuff here as needed
 	
 	return lock;
@@ -123,9 +130,11 @@ void
 lock_destroy(struct lock *lock)
 {
 	assert(lock != NULL);
+    assert(lock->holdingThread == NULL);
+    assert(q_empty(lock->waitqueue));
 
 	// add stuff here as needed
-	
+	q_destroy(lock->waitqueue);
 	kfree(lock->name);
 	kfree(lock);
 }
@@ -133,7 +142,29 @@ lock_destroy(struct lock *lock)
 void
 lock_acquire(struct lock *lock)
 {
-	// Write this
+	assert(lock != NULL);
+
+    // disable interrupt
+    int spl;
+    spl = splhigh();
+
+    if (lock->holdingThread != curthread) {
+        // if the current thread is the holding thread,
+        // then nothing needed to be done.
+        
+        // if the holding thread is NULL,
+        // then we can hold it and return.
+        // otherwise, someone has already held it,
+        // then we go to sleep.
+        while (lock->holdingThread != NULL){
+            thread_sleep(lock->waitqueue);
+        }
+
+
+        lock->holdingThread = curThread;
+    }
+    // enable interrupt
+    splx(spl);
 
 	(void)lock;  // suppress warning until code gets written
 }
@@ -141,19 +172,29 @@ lock_acquire(struct lock *lock)
 void
 lock_release(struct lock *lock)
 {
-	// Write this
+    assert(lock != NULL);
+    assert(lock->holdingThread == curthread);
 
-	(void)lock;  // suppress warning until code gets written
+    int spl;
+
+    // disable int
+    spl = splhigh();
+
+    // first release the lock by setting holdingThread to NULL
+    // then wakeup one thread (if has any) in the waitqueue.
+    lock->holdingThread = NULL;
+    thread_wakeup(lock->waitqueue);
+
+    // enable int
+    splx(spl);
 }
 
 int
 lock_do_i_hold(struct lock *lock)
 {
-	// Write this
+    assert(lock != NULL);
 
-	(void)lock;  // suppress warning until code gets written
-
-	return 1;    // dummy until code gets written
+    return lock->holdingThread == curthread;
 }
 
 ////////////////////////////////////////////////////////////
@@ -177,7 +218,12 @@ cv_create(const char *name)
 		return NULL;
 	}
 	
-	// add stuff here as needed
+    cv->waitqueue = q_create(5);
+    if (cv->waitqueue == NULL) {
+        kfree(cv->name);
+        kfree(cv);
+        return NULL;
+    }
 	
 	return cv;
 }
@@ -187,8 +233,7 @@ cv_destroy(struct cv *cv)
 {
 	assert(cv != NULL);
 
-	// add stuff here as needed
-	
+    q_destroy(cv->waitqueue);
 	kfree(cv->name);
 	kfree(cv);
 }
@@ -196,17 +241,42 @@ cv_destroy(struct cv *cv)
 void
 cv_wait(struct cv *cv, struct lock *lock)
 {
-	// Write this
-	(void)cv;    // suppress warning until code gets written
-	(void)lock;  // suppress warning until code gets written
+    assert(cv != NULL);
+    assert(lock != NULL);
+
+    int spl;
+
+    // disable int
+    spl = splhigh();
+
+    // we must own the lock
+    assert(lock->holdingThread == curthead);
+    
+    lock_release(lock);
+    thread_sleep(cv->waitqueue);
+    lock_acquire(lock);
+    
+    // enable int
+    splx(spl);
 }
 
 void
 cv_signal(struct cv *cv, struct lock *lock)
 {
-	// Write this
-	(void)cv;    // suppress warning until code gets written
-	(void)lock;  // suppress warning until code gets written
+    assert(cv != NULL);
+    assert(lock != NULL);
+
+    int spl;
+    // disable int
+    spl = splhigh();
+
+    if (!q_empty(cv->waitqueue)) {
+        thread_wakeup(cv->waitqueue);
+    }
+
+    // enable int
+    splx(spl);
+
 }
 
 void

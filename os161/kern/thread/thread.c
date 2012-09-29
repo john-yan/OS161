@@ -493,30 +493,51 @@ thread_yield(void)
  * interrupt handler.
  */
 void
-thread_sleep(const void *addr)
+thread_sleep(const struct queue* waitqueue)
 {
 	// may not sleep in an interrupt handler
 	assert(in_interrupt==0);
-	
+	assert(waitqueue != NULL);
+    assert(curthread != NULL);
+
+    // disable interrupt
+    int spl;
+    spl = splhigh();
+
 	curthread->t_sleepaddr = addr;
+    q_addtail(waitqueue, curthread);
 	mi_switch(S_SLEEP);
 	curthread->t_sleepaddr = NULL;
+
+    // enable int
+    splx(spl);
 }
 
 /*
- * Wake up one or more threads who are sleeping on "sleep address"
- * ADDR.
+ * Wake up one thread who is sleeping on the waitqueue.
  */
 void
-thread_wakeup(const void *addr)
+thread_wakeup(const struct queue *waitqueue)
 {
-	int i, result;
+	int i, result, spl;
 	
+    assert(waitqueue != NULL);
 	// meant to be called with interrupts off
-	assert(curspl>0);
+	//assert(curspl>0);
 	
+    // disable int
+    spl = splhigh();
+
+    // just wakeup the next waiting thread in the queue.
+    if (!q_empty(waitqueue)){
+        struct thread* wakeupThread = q_remhead(waitqueue);
+        result = make_runnable(wakeupThread);
+        assert(result == 0);
+    }
+    // enable int
+    splx(spl);
 	// This is inefficient. Feel free to improve it.
-	
+	/* improved
 	for (i=0; i<array_getnum(sleepers); i++) {
 		struct thread *t = array_getguy(sleepers, i);
 		if (t->t_sleepaddr == addr) {
@@ -527,14 +548,41 @@ thread_wakeup(const void *addr)
 			// must look at the same sleepers[i] again
 			i--;
 
-			/*
+			/ *
 			 * Because we preallocate during thread_fork,
 			 * this should never fail.
-			 */
+			 * /
 			result = make_runnable(t);
 			assert(result==0);
 		}
 	}
+    */
+}
+
+/*
+ * Wakeup all threads in the waitqueue
+ */
+void
+thread_wakeupAll(const struct queue *waitqueue)
+{
+	int result, spl;
+	
+    assert(waitqueue != NULL);
+	// meant to be called with interrupts off
+	//assert(curspl>0);
+	
+    // disable int
+    spl = splhigh();
+
+    // just wakeup the next waiting thread in the queue.
+    while (!q_empty(waitqueue)){
+        struct thread* wakeupThread = q_remhead(waitqueue);
+        result = make_runnable(wakeupThread);
+        assert(result == 0);
+    }
+
+    // enable int
+    splx(spl);
 }
 
 /*
@@ -542,20 +590,14 @@ thread_wakeup(const void *addr)
  * ADDR. This is meant to be used only for diagnostic purposes.
  */
 int
-thread_hassleepers(const void *addr)
+thread_hassleepers(const struct queue *waitqueue)
 {
 	int i;
 	
 	// meant to be called with interrupts off
 	assert(curspl>0);
 	
-	for (i=0; i<array_getnum(sleepers); i++) {
-		struct thread *t = array_getguy(sleepers, i);
-		if (t->t_sleepaddr == addr) {
-			return 1;
-		}
-	}
-	return 0;
+    return q_empty(waitqueue);
 }
 
 /*
