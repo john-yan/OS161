@@ -20,6 +20,7 @@
 
 struct semaphore {
 	char *name;
+    struct queue* waitqueue;
 	volatile int count;
 };
 

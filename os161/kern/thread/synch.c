@@ -9,6 +9,7 @@
 #include <thread.h>
 #include <curthread.h>
 #include <machine/spl.h>
+#include <queue.h>
 
 ////////////////////////////////////////////////////////////
 //
@@ -32,6 +33,7 @@ sem_create(const char *namearg, int initial_count)
 		return NULL;
 	}
 
+    sem->waitqueue = q_create(32);
 	sem->count = initial_count;
 	return sem;
 }
@@ -43,7 +45,7 @@ sem_destroy(struct semaphore *sem)
 	assert(sem != NULL);
 
 	spl = splhigh();
-	assert(thread_hassleepers(sem)==0);
+	assert(thread_hassleepers(sem->waitqueue)==0);
 	splx(spl);
 
 	/*
@@ -55,6 +57,7 @@ sem_destroy(struct semaphore *sem)
 	 * including the kfrees in the splhigh block, so we don't.
 	 */
 
+    q_destroy(sem->waitqueue);
 	kfree(sem->name);
 	kfree(sem);
 }
@@ -75,7 +78,7 @@ P(struct semaphore *sem)
 
 	spl = splhigh();
 	while (sem->count==0) {
-		thread_sleep(sem);
+		thread_sleep(sem->waitqueue);
 	}
 	assert(sem->count>0);
 	sem->count--;
@@ -90,7 +93,7 @@ V(struct semaphore *sem)
 	spl = splhigh();
 	sem->count++;
 	assert(sem->count>0);
-	thread_wakeup(sem);
+	thread_wakeup(sem->waitqueue);
 	splx(spl);
 }
 
@@ -161,7 +164,7 @@ lock_acquire(struct lock *lock)
         }
 
 
-        lock->holdingThread = curThread;
+        lock->holdingThread = curthread;
     }
     // enable interrupt
     splx(spl);
@@ -250,7 +253,7 @@ cv_wait(struct cv *cv, struct lock *lock)
     spl = splhigh();
 
     // we must own the lock
-    assert(lock->holdingThread == curthead);
+    assert(lock->holdingThread == curthread);
     
     lock_release(lock);
     thread_sleep(cv->waitqueue);
@@ -282,7 +285,16 @@ cv_signal(struct cv *cv, struct lock *lock)
 void
 cv_broadcast(struct cv *cv, struct lock *lock)
 {
-	// Write this
-	(void)cv;    // suppress warning until code gets written
-	(void)lock;  // suppress warning until code gets written
+    assert(cv!=NULL);
+    assert(lock!=NULL);
+
+    int spl;
+
+    // disable int
+    spl = splhigh();
+    
+    thread_wakeupAll(lock->waitqueue);
+
+    // enable int
+    splx(spl);
 }

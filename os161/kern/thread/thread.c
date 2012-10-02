@@ -13,6 +13,7 @@
 #include <addrspace.h>
 #include <vnode.h>
 #include "opt-synchprobs.h"
+#include <queue.h>
 
 /* States a thread can be in. */
 typedef enum {
@@ -493,7 +494,7 @@ thread_yield(void)
  * interrupt handler.
  */
 void
-thread_sleep(const struct queue* waitqueue)
+thread_sleep(struct queue* waitqueue)
 {
 	// may not sleep in an interrupt handler
 	assert(in_interrupt==0);
@@ -504,7 +505,7 @@ thread_sleep(const struct queue* waitqueue)
     int spl;
     spl = splhigh();
 
-	curthread->t_sleepaddr = addr;
+	curthread->t_sleepaddr = waitqueue;
     q_addtail(waitqueue, curthread);
 	mi_switch(S_SLEEP);
 	curthread->t_sleepaddr = NULL;
@@ -517,7 +518,7 @@ thread_sleep(const struct queue* waitqueue)
  * Wake up one thread who is sleeping on the waitqueue.
  */
 void
-thread_wakeup(const struct queue *waitqueue)
+thread_wakeup(struct queue *waitqueue)
 {
 	int i, result, spl;
 	
@@ -531,11 +532,13 @@ thread_wakeup(const struct queue *waitqueue)
     // just wakeup the next waiting thread in the queue.
     if (!q_empty(waitqueue)){
         struct thread* wakeupThread = q_remhead(waitqueue);
+        assert(wakeupThread != NULL);
         result = make_runnable(wakeupThread);
         assert(result == 0);
     }
     // enable int
     splx(spl);
+
 	// This is inefficient. Feel free to improve it.
 	/* improved
 	for (i=0; i<array_getnum(sleepers); i++) {
@@ -563,7 +566,7 @@ thread_wakeup(const struct queue *waitqueue)
  * Wakeup all threads in the waitqueue
  */
 void
-thread_wakeupAll(const struct queue *waitqueue)
+thread_wakeupAll(struct queue *waitqueue)
 {
 	int result, spl;
 	
@@ -577,6 +580,7 @@ thread_wakeupAll(const struct queue *waitqueue)
     // just wakeup the next waiting thread in the queue.
     while (!q_empty(waitqueue)){
         struct thread* wakeupThread = q_remhead(waitqueue);
+        assert(wakeupThread != NULL);
         result = make_runnable(wakeupThread);
         assert(result == 0);
     }
@@ -590,7 +594,7 @@ thread_wakeupAll(const struct queue *waitqueue)
  * ADDR. This is meant to be used only for diagnostic purposes.
  */
 int
-thread_hassleepers(const struct queue *waitqueue)
+thread_hassleepers(struct queue *waitqueue)
 {
 	int i;
 	

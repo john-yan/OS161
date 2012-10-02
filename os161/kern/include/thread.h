@@ -7,6 +7,7 @@
 
 /* Get machine-dependent stuff */
 #include <machine/pcb.h>
+#include <queue.h>
 
 
 struct addrspace;
@@ -18,7 +19,7 @@ struct thread {
 	
 	struct pcb t_pcb;
 	char *t_name;
-	const void *t_sleepaddr;
+	struct queue* t_sleepaddr;
 	char *t_stack;
 	
 	/**********************************************************/
@@ -82,24 +83,24 @@ void thread_yield(void);
  * address is treated as a key and is not interpreted or dereferenced.
  * Interrupts must be disabled.
  */
-void thread_sleep(const struct queue *addr);
+void thread_sleep(struct queue *waitqueue);
 
 /*
  * Cause one thread sleeping on the specified address to wake up.
  * Interrupts must be disabled.
  */
-void thread_wakeup(const struct queue *addr);
+void thread_wakeup(struct queue *waitqueue);
 
 /*
  * Cause all threads being waked up.
  */
-void thread_wakeupAll(const struct queue *addr);
+void thread_wakeupAll(struct queue *waitqueue);
 
 /*
  * Return nonzero if there are any threads sleeping on the specified
  * address. Meant only for diagnostic purposes.
  */
-int thread_hassleepers(const struct queue *addr);
+int thread_hassleepers(struct queue *waitqueue);
 
 
 /*
