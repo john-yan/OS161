@@ -52,14 +52,15 @@
  */
 
 /* who should be "cat" or "mouse" */
-void
-eat(const char *who, int num, int iteration)
+static void
+sem_eat(const char *who, int num, int bowl, int iteration)
 {
-        kprintf("%s: %d starts eating: %d\n", who, num, iteration);
+        kprintf("%s: %d starts eating: bowl %d, iteration %d\n", who, num, 
+                bowl, iteration);
         clocksleep(1);
-        kprintf("%s: %d ends eating: %d\n", who, num, iteration);
+        kprintf("%s: %d ends eating: bowl %d, iteration %d\n", who, num, 
+                bowl, iteration);
 }
-
 
 /*
  * catsem()

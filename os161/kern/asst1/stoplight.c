@@ -41,12 +41,23 @@
 
 static const char *directions[] = { "N", "E", "S", "W" };
 
-/* str should be "approaching", "entering" or "leaving" */
-void
-message(const char *str, int carnumber, int cardirection, int destdirection)
+static const char *msgs[] = {
+        "approaching:",
+        "region1:    ",
+        "region2:    ",
+        "region3:    ",
+        "leaving:    "
+};
+
+/* use these constants for the first parameter of message */
+enum { APPROACHING, REGION1, REGION2, REGION3, LEAVING };
+
+static void
+message(int msg_nr, int carnumber, int cardirection, int destdirection)
 {
-        kprintf("%s: car = %d, direction = %s, destination = %s\n", str, 
-                carnumber, directions[cardirection], directions[destdirection]);
+        kprintf("%s car = %2d, direction = %s, destination = %s\n",
+                msgs[msg_nr], carnumber,
+                directions[cardirection], directions[destdirection]);
 }
  
 /*
