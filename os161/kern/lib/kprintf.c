@@ -52,6 +52,7 @@ kprintf(const char *fmt, ...)
 {
 	int chars;
 	va_list ap;
+    //int spl = splhigh();
 
 	if (kprintf_lock != NULL && !in_interrupt && curspl==0) {
 		lock_acquire(kprintf_lock);
@@ -65,6 +66,7 @@ kprintf(const char *fmt, ...)
 		lock_release(kprintf_lock);
 	}
 
+    //splx(spl);
 	return chars;
 }
 
@@ -118,6 +120,7 @@ panic(const char *fmt, ...)
 		va_end(ap);
 	}
 
+    //for(;;);
 	if (evil==3) {
 		evil = 4;
 

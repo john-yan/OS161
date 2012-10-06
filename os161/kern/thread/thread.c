@@ -133,9 +133,9 @@ thread_killall(void)
 	 * wake up while we're shutting down.
 	 */
 
-	for (i=0; i<array_getnum(sleepers); i++) {
-		struct thread *t = array_getguy(sleepers, i);
-		kprintf("sleep: Dropping thread %s\n", t->t_name);
+	//for (i=0; i<array_getnum(sleepers); i++) {
+	//	struct thread *t = array_getguy(sleepers, i);
+	//	kprintf("sleep: Dropping thread %s\n", t->t_name);
 
 		/*
 		 * Don't do this: because these threads haven't
@@ -145,11 +145,11 @@ thread_killall(void)
 		 *
 		 * array_add(zombies, t);
 		 */
-	}
+	//}
 
-	result = array_setsize(sleepers, 0);
+	//result = array_setsize(sleepers, 0);
 	/* shrinking array: not supposed to fail */
-	assert(result==0);
+	//assert(result==0);
 }
 
 /*
@@ -476,7 +476,7 @@ thread_yield(void)
 	int spl = splhigh();
 
 	/* Check sleepers just in case we get here after shutdown */
-	assert(sleepers != NULL);
+	//assert(sleepers != NULL);
 
 	mi_switch(S_READY);
 	splx(spl);

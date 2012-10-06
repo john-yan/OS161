@@ -33,7 +33,7 @@ sem_create(const char *namearg, int initial_count)
 		return NULL;
 	}
 
-    sem->waitqueue = q_create(32);
+    sem->waitqueue = q_create(1);
 	sem->count = initial_count;
 	return sem;
 }

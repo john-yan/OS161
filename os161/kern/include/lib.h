@@ -199,7 +199,7 @@ int copyoutstr(const char *src, userptr_t userdest, size_t len, size_t *got);
  * clocksleep() suspends execution for the requested number of seconds,
  * like userlevel sleep(3). (Don't confuse it with thread_sleep.)
  */
-extern int lbolt;
+extern struct queue* lbolt;
 void clocksleep(int seconds);
 
 /*
