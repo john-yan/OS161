@@ -1,10 +1,11 @@
 #ifndef _TEST_H_
 #define _TEST_H_
-
+#include <synch.h>
 /*
  * Declarations for test code and other miscellaneous functions.
  */
 
+extern struct semphore* cmdSem;
 
 /* These are only actually available if OPT_SYNCHPROBS is set. */
 int catmousesem(int, char **);

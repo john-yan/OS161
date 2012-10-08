@@ -381,7 +381,7 @@ mi_switch(threadstate_t nextstate)
 		 * Because we preallocate sleepers[] during thread_fork,
 		 * this should never fail.
 		 */
-		result = array_add(sleepers, cur);
+		//result = array_add(sleepers, cur);
 	}
 	else {
 		assert(nextstate==S_ZOMB);

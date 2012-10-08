@@ -293,7 +293,7 @@ cv_broadcast(struct cv *cv, struct lock *lock)
     // disable int
     spl = splhigh();
     
-    thread_wakeupAll(lock->waitqueue);
+    thread_wakeupAll(cv->waitqueue);
 
     // enable int
     splx(spl);

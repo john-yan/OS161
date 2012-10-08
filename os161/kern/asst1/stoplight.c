@@ -18,6 +18,7 @@
 #include <lib.h>
 #include <test.h>
 #include <thread.h>
+#include <synch.h>
 
 
 /*
@@ -39,13 +40,104 @@
  *
  */
 
+enum { NW, NE, SE, SW, NONE};
+enum { N,  E,  S,  W,  EMPTY, LEAVE};
+
+static struct {
+	struct lock* intersectionLock;
+	struct cv* waitFor[4];
+	int slots[4];
+} intersectionMonitor;
+
+/*
+ * the function checks deadlock when a car is approching the
+ * intersection. 
+ * 
+ * return 0 if no deadlock, return 1 otherwise.
+ * 
+ */
+
+static
+void printslot()
+{
+	kprintf("%d %d %d %d", 	intersectionMonitor.slots[0],
+							intersectionMonitor.slots[1],
+							intersectionMonitor.slots[2],
+							intersectionMonitor.slots[3]);
+}
+
+static int IsDeadLockOccur(int slotIndex, int direction)
+{
+	// assert the calling function holds the monitor lock
+	assert(lock_do_i_hold(intersectionMonitor.intersectionLock));
+	assert(intersectionMonitor.slots[slotIndex] == EMPTY);
+	assert(slotIndex >= NW && slotIndex <= SW);
+	intersectionMonitor.slots[slotIndex] = direction;
+	
+	// check if N = NW, E = NE, SE = S, SW = W occur.
+	int i;
+	for (i = 0; i < 4; i++) {
+		if (intersectionMonitor.slots[i] != i) {
+			intersectionMonitor.slots[slotIndex] = EMPTY;
+			return 0;
+		}
+	}
+	// kprintf("deadlock detect: ");
+	// printslot();
+	// kprintf(" <- ");
+	intersectionMonitor.slots[slotIndex] = EMPTY;
+	// printslot();
+	// kprintf("\n");
+	return 1;
+}
+
+static
+void LeavingSlot(int slotToLeave)
+{
+	if (slotToLeave == NONE) return;
+	lock_acquire(intersectionMonitor.intersectionLock);
+	
+	assert(slotToLeave >= NW && slotToLeave <= SW);
+	intersectionMonitor.slots[slotToLeave] = EMPTY;
+	cv_broadcast(intersectionMonitor.waitFor[slotToLeave],
+				intersectionMonitor.intersectionLock);
+	
+	lock_release(intersectionMonitor.intersectionLock);
+}
+
+static 
+void GoToSlot(int curSlot, int myDirection, int slotToGo)
+{
+	lock_acquire(intersectionMonitor.intersectionLock);
+	
+	// check if deadlock occur, if so, wait
+	// kprintf("slotToGo = %d\n", slotToGo);
+	while (intersectionMonitor.slots[slotToGo] != EMPTY
+			|| (curSlot == NONE && IsDeadLockOccur(slotToGo, myDirection))) {
+		//kprintf("intersectionMonitor.slots[slotToGo] = %d\n", intersectionMonitor.slots[slotToGo]);
+		cv_signal(intersectionMonitor.waitFor[slotToGo],
+				intersectionMonitor.intersectionLock);
+		cv_wait(intersectionMonitor.waitFor[slotToGo], 
+				intersectionMonitor.intersectionLock);
+	}
+	
+	intersectionMonitor.slots[slotToGo] = myDirection;
+	if (curSlot != NONE) {
+		intersectionMonitor.slots[curSlot] = EMPTY;
+		cv_broadcast(intersectionMonitor.waitFor[curSlot],
+				intersectionMonitor.intersectionLock);
+	}
+	
+	lock_release(intersectionMonitor.intersectionLock);
+}
+
 static const char *directions[] = { "N", "E", "S", "W" };
 
 static const char *msgs[] = {
-        "approaching:",
-        "region1:    ",
-        "region2:    ",
-        "region3:    ",
+        "                              approaching:",
+        "                       region1:    ",
+        "                region2:    ",
+        "        region3:    ",
         "leaving:    "
 };
 
@@ -55,9 +147,13 @@ enum { APPROACHING, REGION1, REGION2, REGION3, LEAVING };
 static void
 message(int msg_nr, int carnumber, int cardirection, int destdirection)
 {
-        kprintf("%s car = %2d, direction = %s, destination = %s\n",
-                msgs[msg_nr], carnumber,
-                directions[cardirection], directions[destdirection]);
+	lock_acquire(intersectionMonitor.intersectionLock);
+	kprintf("%s car = %2d, direction = %s, destination = %s: ",
+			msgs[msg_nr], carnumber,
+			directions[cardirection], directions[destdirection]);
+	printslot();
+	kprintf("\n");
+	lock_release(intersectionMonitor.intersectionLock);
 }
  
 /*
@@ -82,12 +178,23 @@ void
 gostraight(unsigned long cardirection,
            unsigned long carnumber)
 {
-        /*
-         * Avoid unused variable warnings.
-         */
-        
-        (void) cardirection;
-        (void) carnumber;
+	int slot1 = cardirection;
+	int slot2 = (cardirection + 3) % 4;
+	int dest = (cardirection + 2) % 4;
+	
+	message(APPROACHING, carnumber, cardirection, dest);
+	
+	// go to slot1
+	GoToSlot(NONE, cardirection, slot1);
+	message(REGION1, carnumber, cardirection, dest);
+	
+	// go to slot2
+	GoToSlot(slot1, LEAVE, slot2);
+	message(REGION2, carnumber, cardirection, dest);
+	
+	// leave intersection
+	LeavingSlot(slot2);
+	message(LEAVING, carnumber, cardirection, dest);
 }
 
 
@@ -113,12 +220,31 @@ void
 turnleft(unsigned long cardirection,
          unsigned long carnumber)
 {
-        /*
-         * Avoid unused variable warnings.
-         */
-
-        (void) cardirection;
-        (void) carnumber;
+	int slot1 = cardirection;
+	int slot2 = (cardirection + 3) % 4;
+	int slot3 = (cardirection + 2) % 4;
+	
+	int turn = (cardirection + 3) % 4;
+	int dest = (cardirection + 1) % 4;
+	
+	message(APPROACHING, carnumber, cardirection, dest);
+	
+	// go to slot1
+	GoToSlot(NONE, cardirection, slot1);
+	message(REGION1, carnumber, cardirection, dest);
+	
+	// go to slot2
+	GoToSlot(slot1, turn, slot2);
+	message(REGION2, carnumber, cardirection, dest);
+	
+	// go to slot3
+	GoToSlot(slot2, LEAVE, slot3);
+	message(REGION3, carnumber, cardirection, dest);
+	
+	// leave slot3
+	LeavingSlot(slot3);
+	message(LEAVING, carnumber, cardirection, dest);
+	
 }
 
 
@@ -144,12 +270,19 @@ void
 turnright(unsigned long cardirection,
           unsigned long carnumber)
 {
-        /*
-         * Avoid unused variable warnings.
-         */
-
-        (void) cardirection;
-        (void) carnumber;
+	int slot1 = cardirection;
+	int dest = (cardirection + 3) % 4;
+	
+	message(APPROACHING, carnumber, cardirection, dest);
+	
+	// go to slot1
+	GoToSlot(NONE, LEAVE, slot1);
+	message(REGION1, carnumber, cardirection, dest);
+	
+	// leave intersection
+	LeavingSlot(slot1);
+	message(LEAVING, carnumber, cardirection, dest);
+	
 }
 
 
@@ -178,23 +311,25 @@ void
 approachintersection(void * unusedpointer,
                      unsigned long carnumber)
 {
-        int cardirection;
-
-        /*
-         * Avoid unused variable and function warnings.
-         */
-
-        (void) unusedpointer;
-        (void) carnumber;
-	(void) gostraight;
-	(void) turnleft;
-	(void) turnright;
-
-        /*
-         * cardirection is set randomly.
-         */
-
-        cardirection = random() % 4;
+	(void) unusedpointer;
+	int cardirection = random() % 4;
+	int turn;
+	
+	while (1) {
+		turn = random() % 4;
+		if (turn == (cardirection + 2) % 4) {
+			gostraight(cardirection, carnumber);
+			break;
+		}
+		else if (turn == (cardirection + 1) % 4){
+			turnleft(cardirection, carnumber);
+			break;
+		}
+		else if (turn == (cardirection + 3) % 4) {
+			turnright(cardirection, carnumber);
+			break;
+		}
+	}
 }
 
 
@@ -213,12 +348,55 @@ approachintersection(void * unusedpointer,
  *      free to modiy this code as necessary for your solution.
  */
 
+static struct lock *l;
+static struct cv* cond;
+static int i = 0;
+static int j = 1;
+
+static
+void test(void * unusedpointer,
+                     unsigned long th)
+{
+	int k;
+	for (k = 0; k < 100; k ++) {
+		lock_acquire(l);
+		while (j != 1)
+			cv_wait(cond, l);
+		// kprintf("set j to 0\n");
+		j = 0;
+		lock_release(l);
+		
+		// kprintf("incr i\n");
+		i++;
+		thread_yield();
+		
+		lock_acquire(l);
+		j = 1;
+		// kprintf("set j to 1");
+		cv_broadcast(cond, l);
+		lock_release(l);
+	}
+	kprintf("i = %d\n", i);
+}
+
 int
 createcars(int nargs,
            char ** args)
 {
+	l = lock_create("");
+	cond = cv_create("");
         int index, error;
+		
+		// for (index = 0; index < 100; index++) {
 
+                // error = thread_fork("",
+                                    // NULL,
+                                    // index,
+                                    // test,
+                                    // NULL
+                                    // );
+		// }
+		// return 0;
         /*
          * Avoid unused variable warnings.
          */
@@ -230,6 +408,13 @@ createcars(int nargs,
          * Start NCARS approachintersection() threads.
          */
 
+		// initialize variables
+		intersectionMonitor.intersectionLock = lock_create("");
+		for (index = 0; index < 4; index++ ) {
+			intersectionMonitor.waitFor[index] = cv_create("");
+			intersectionMonitor.slots[index] = EMPTY;
+		}
+		
         for (index = 0; index < NCARS; index++) {
 
                 error = thread_fork("approachintersection thread",

@@ -604,6 +604,7 @@ static struct {
 	{ NULL, NULL }
 };
 
+struct semphore* cmdSem = NULL;
 /*
  * Process a single command.
  */
@@ -611,6 +612,7 @@ static
 int
 cmd_dispatch(char *cmd)
 {
+	if (!cmdSem) cmdSem = sem_create("", 0);
 	time_t beforesecs, aftersecs, secs;
 	u_int32_t beforensecs, afternsecs, nsecs;
 	char *args[MAXMENUARGS];
@@ -646,7 +648,7 @@ cmd_dispatch(char *cmd)
 			getinterval(beforesecs, beforensecs,
 				    aftersecs, afternsecs,
 				    &secs, &nsecs);
-
+			P(cmdSem);
 			kprintf("Operation took %lu.%09lu seconds\n",
 				(unsigned long) secs,
 				(unsigned long) nsecs);
