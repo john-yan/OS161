@@ -648,7 +648,7 @@ cmd_dispatch(char *cmd)
 			getinterval(beforesecs, beforensecs,
 				    aftersecs, afternsecs,
 				    &secs, &nsecs);
-			P(cmdSem);
+
 			kprintf("Operation took %lu.%09lu seconds\n",
 				(unsigned long) secs,
 				(unsigned long) nsecs);

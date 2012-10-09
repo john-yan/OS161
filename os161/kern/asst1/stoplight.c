@@ -348,93 +348,49 @@ approachintersection(void * unusedpointer,
  *      free to modiy this code as necessary for your solution.
  */
 
-static struct lock *l;
-static struct cv* cond;
-static int i = 0;
-static int j = 1;
-
-static
-void test(void * unusedpointer,
-                     unsigned long th)
-{
-	int k;
-	for (k = 0; k < 100; k ++) {
-		lock_acquire(l);
-		while (j != 1)
-			cv_wait(cond, l);
-		// kprintf("set j to 0\n");
-		j = 0;
-		lock_release(l);
-		
-		// kprintf("incr i\n");
-		i++;
-		thread_yield();
-		
-		lock_acquire(l);
-		j = 1;
-		// kprintf("set j to 1");
-		cv_broadcast(cond, l);
-		lock_release(l);
-	}
-	kprintf("i = %d\n", i);
-}
-
 int
 createcars(int nargs,
            char ** args)
 {
-	l = lock_create("");
-	cond = cv_create("");
-        int index, error;
-		
-		// for (index = 0; index < 100; index++) {
+	RunTestForCV();
+	/*
+	 * Avoid unused variable warnings.
+	 */
 
-                // error = thread_fork("",
-                                    // NULL,
-                                    // index,
-                                    // test,
-                                    // NULL
-                                    // );
-		// }
-		// return 0;
-        /*
-         * Avoid unused variable warnings.
-         */
+	(void) nargs;
+	(void) args;
+	int index, error;
+	/*
+	 * Start NCARS approachintersection() threads.
+	 */
 
-        (void) nargs;
-        (void) args;
+	// initialize variables
+	intersectionMonitor.intersectionLock = lock_create("");
+	for (index = 0; index < 4; index++ ) {
+		intersectionMonitor.waitFor[index] = cv_create("");
+		intersectionMonitor.slots[index] = EMPTY;
+	}
+	
+	for (index = 0; index < NCARS; index++) {
 
-        /*
-         * Start NCARS approachintersection() threads.
-         */
+			error = thread_fork("approachintersection thread",
+								NULL,
+								index,
+								approachintersection,
+								NULL
+								);
 
-		// initialize variables
-		intersectionMonitor.intersectionLock = lock_create("");
-		for (index = 0; index < 4; index++ ) {
-			intersectionMonitor.waitFor[index] = cv_create("");
-			intersectionMonitor.slots[index] = EMPTY;
-		}
-		
-        for (index = 0; index < NCARS; index++) {
+			/*
+			 * panic() on error.
+			 */
 
-                error = thread_fork("approachintersection thread",
-                                    NULL,
-                                    index,
-                                    approachintersection,
-                                    NULL
-                                    );
+			if (error) {
+					
+					panic("approachintersection: thread_fork failed: %s\n",
+						  strerror(error)
+						  );
+			}
+	}
 
-                /*
-                 * panic() on error.
-                 */
-
-                if (error) {
-                        
-                        panic("approachintersection: thread_fork failed: %s\n",
-                              strerror(error)
-                              );
-                }
-        }
-
-        return 0;
+	return 0;
 }
