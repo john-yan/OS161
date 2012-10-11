@@ -143,7 +143,7 @@ catlock(void * unusedpointer,
 			mybowl = getbowl();
 			lock_release(mon);
 			
-			lock_eat("cat", catnumber, mybowl, i);
+			lock_eat("cat", catnumber, mybowl + 1, i);
 			
 			lock_acquire(mon);
 			retbowl(mybowl);
@@ -196,7 +196,7 @@ mouselock(void * unusedpointer,
 			mybowl = getbowl();
 			lock_release(mon);
 			
-			lock_eat("mouse", mousenumber, mybowl, i);
+			lock_eat("mouse", mousenumber, mybowl + 1, i);
 			
 			lock_acquire(mon);
 			retbowl(mybowl);

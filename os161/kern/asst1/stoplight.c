@@ -148,11 +148,11 @@ static void
 message(int msg_nr, int carnumber, int cardirection, int destdirection)
 {
 	lock_acquire(intersectionMonitor.intersectionLock);
-	kprintf("%s car = %2d, direction = %s, destination = %s: ",
+	kprintf("%s car = %2d, direction = %s, destination = %s\n",
 			msgs[msg_nr], carnumber,
 			directions[cardirection], directions[destdirection]);
-	printslot();
-	kprintf("\n");
+	// printslot();
+    // kprintf("\n");
 	lock_release(intersectionMonitor.intersectionLock);
 }
  

@@ -146,7 +146,7 @@ catsem(void * unusedpointer,
             V(sem);
 
             mybowl = getbowl();
-            sem_eat("cat", catnumber, mybowl, i);
+            sem_eat("cat", catnumber, mybowl + 1, i);
 
             P(sem);
             ncats_eating--;
@@ -203,7 +203,7 @@ mousesem(void * unusedpointer,
             V(sem);
 
             mybowl = getbowl();
-            sem_eat("mouse", mousenumber, mybowl, i);
+            sem_eat("mouse", mousenumber, mybowl + 1, i);
 
             P(sem);
             nmice_eating--;
