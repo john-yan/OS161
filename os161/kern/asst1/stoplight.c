@@ -352,7 +352,6 @@ int
 createcars(int nargs,
            char ** args)
 {
-	RunTestForCV();
 	/*
 	 * Avoid unused variable warnings.
 	 */
