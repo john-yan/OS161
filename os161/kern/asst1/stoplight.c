@@ -33,6 +33,9 @@
 
 #define NCARS 20
 
+#define ISDIR(X) ((X) < 0)
+#define ISSLOT(X) ((X) >= 0)
+#define GETDIR(X) (~(X))
 
 /*
  *
@@ -63,10 +66,14 @@ static struct {
 static
 void printslot()
 {
-	kprintf("%d %d %d %d", 	intersectionMonitor.slots[0],
+	kprintf("%d %d %d %d %d %d %d %d\n", 	intersectionMonitor.slots[0],
 							intersectionMonitor.slots[1],
 							intersectionMonitor.slots[2],
-							intersectionMonitor.slots[3]);
+							intersectionMonitor.slots[3],
+							intersectionMonitor.appro[0],
+							intersectionMonitor.appro[1],
+							intersectionMonitor.appro[2],
+							intersectionMonitor.appro[3]);
 }
 
 static int IsDeadLockOccur(int slotIndex, int direction)
@@ -110,26 +117,27 @@ void LeavingSlot(int slotToLeave, int msg_nr, int carnumber, int src, int dest)
 
 static
 void Approching(int direction, int msg_nr, int carnumber, int src, int dest){
+	// assert(direction == 0);
+	assert(direction < 4 && direction >= 0);
 	lock_acquire(intersectionMonitor.intersectionLock);
-
-    if (intersectionMonitor.appro[direction] == 1) {
+	intersectionMonitor.appro[direction] ++;
+	message(msg_nr, carnumber, src, dest);
+    if (intersectionMonitor.appro[direction] > 1) {
         cv_wait(intersectionMonitor.waitForAppro[direction],
                 intersectionMonitor.intersectionLock);
     }
-    intersectionMonitor.appro[direction] = 1;
-	message(msg_nr, carnumber, src, dest);
+	
 	lock_release(intersectionMonitor.intersectionLock);
 }
 
 static 
-void GoToSlot(int curSlot, int myDirection, int slotToGo, int msg_nr, int carnumber, int src, int dest)
+void GoToSlot(int curState, int myDirection, int slotToGo, int msg_nr, int carnumber, int src, int dest)
 {
 	lock_acquire(intersectionMonitor.intersectionLock);
-	
+	assert(curState >= -4 && curState < 4);
 	// check if deadlock occur, if so, wait
-	// kprintf("slotToGo = %d\n", slotToGo);
 	while (intersectionMonitor.slots[slotToGo] != EMPTY
-			|| (curSlot == NONE && IsDeadLockOccur(slotToGo, myDirection))) {
+			|| ( !ISSLOT(curState) && IsDeadLockOccur(slotToGo, myDirection))) {
 		//kprintf("intersectionMonitor.slots[slotToGo] = %d\n", intersectionMonitor.slots[slotToGo]);
 		cv_signal(intersectionMonitor.waitForSlot[slotToGo],
 				intersectionMonitor.intersectionLock);
@@ -139,14 +147,13 @@ void GoToSlot(int curSlot, int myDirection, int slotToGo, int msg_nr, int carnum
 	
 	intersectionMonitor.slots[slotToGo] = myDirection;
 
-    assert(curSlot >= -4 && curSlot < 4);
-	if (curSlot >= 0 && curSlot < NONE) {
-		intersectionMonitor.slots[curSlot] = EMPTY;
-	    cv_signal(intersectionMonitor.waitForSlot[curSlot],
+	if (ISSLOT(curState)) {
+		intersectionMonitor.slots[curState] = EMPTY;
+	    cv_signal(intersectionMonitor.waitForSlot[curState],
 				intersectionMonitor.intersectionLock);
 	} else {
-        int dirAppro = ~curSlot;
-        intersectionMonitor.appro[dirAppro] = 0;
+        int dirAppro = GETDIR(curState);
+        intersectionMonitor.appro[dirAppro] --;
         cv_signal(intersectionMonitor.waitForAppro[dirAppro],
                 intersectionMonitor.intersectionLock);
     }
@@ -171,13 +178,9 @@ enum { APPROACHING, REGION1, REGION2, REGION3, LEAVING };
 static void
 message(int msg_nr, int carnumber, int cardirection, int destdirection)
 {
-	lock_acquire(intersectionMonitor.intersectionLock);
 	kprintf("%s car = %2d, direction = %s, destination = %s\n",
 			msgs[msg_nr], carnumber,
 			directions[cardirection], directions[destdirection]);
-	// printslot();
-    // kprintf("\n");
-	lock_release(intersectionMonitor.intersectionLock);
 }
  
 /*
@@ -210,7 +213,7 @@ gostraight(unsigned long cardirection,
     Approching(cardirection, APPROACHING, carnumber, cardirection, dest);
 	
 	// go to slot1
-	GoToSlot(~cardirection, cardirection, slot1, REGION1, carnumber, cardirection, dest);
+	GoToSlot(GETDIR(cardirection), cardirection, slot1, REGION1, carnumber, cardirection, dest);
 	
 	// go to slot2
 	GoToSlot(slot1, LEAVE, slot2, REGION2, carnumber, cardirection, dest);
@@ -253,7 +256,7 @@ turnleft(unsigned long cardirection,
     Approching(cardirection, APPROACHING, carnumber, cardirection, dest);
 	
 	// go to slot1
-	GoToSlot(~cardirection, cardirection, slot1, REGION1, carnumber, cardirection, dest);
+	GoToSlot(GETDIR(cardirection), cardirection, slot1, REGION1, carnumber, cardirection, dest);
 	
 	// go to slot2
 	GoToSlot(slot1, turn, slot2, REGION2, carnumber, cardirection, dest);
@@ -295,7 +298,7 @@ turnright(unsigned long cardirection,
     Approching(cardirection, APPROACHING, carnumber, cardirection, dest);
 	
 	// go to slot1
-	GoToSlot(~cardirection, LEAVE, slot1, REGION1, carnumber, cardirection, dest);
+	GoToSlot(GETDIR(cardirection), LEAVE, slot1, REGION1, carnumber, cardirection, dest);
 	
 	// leave intersection
 	LeavingSlot(slot1, LEAVING, carnumber, cardirection, dest);	
@@ -371,7 +374,6 @@ createcars(int nargs,
 	/*
 	 * Avoid unused variable warnings.
 	 */
-
 	(void) nargs;
 	(void) args;
 	int index, error;
