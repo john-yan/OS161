@@ -45,7 +45,9 @@ enum { N,  E,  S,  W,  EMPTY, LEAVE};
 
 static struct {
 	struct lock* intersectionLock;
-	struct cv* waitFor[4];
+	struct cv* waitForSlot[4];
+    struct cv* waitForAppro[4];
+    int appro[4];
 	int slots[4];
 } intersectionMonitor;
 
@@ -99,14 +101,26 @@ void LeavingSlot(int slotToLeave)
 	
 	assert(slotToLeave >= NW && slotToLeave <= SW);
 	intersectionMonitor.slots[slotToLeave] = EMPTY;
-	cv_broadcast(intersectionMonitor.waitFor[slotToLeave],
+	cv_signal(intersectionMonitor.waitForSlot[slotToLeave],
 				intersectionMonitor.intersectionLock);
 	
 	lock_release(intersectionMonitor.intersectionLock);
 }
 
+static
+void Approching(int direction){
+	lock_acquire(intersectionMonitor.intersectionLock);
+
+    if (intersectionMonitor.appro[direction] == 1) {
+        cv_wait(intersectionMonitor.waitForAppro[direction],
+                intersectionMonitor.intersectionLock);
+    }
+    intersectionMonitor.appro[direction] = 1;
+	lock_release(intersectionMonitor.intersectionLock);
+}
+
 static 
-void GoToSlot(int curSlot, int myDirection, int slotToGo)
+void GoToSlot(int curSlot, int myDirection, int slotToGo, int msg_nr, int carnumber, int src, int dest)
 {
 	lock_acquire(intersectionMonitor.intersectionLock);
 	
@@ -115,19 +129,27 @@ void GoToSlot(int curSlot, int myDirection, int slotToGo)
 	while (intersectionMonitor.slots[slotToGo] != EMPTY
 			|| (curSlot == NONE && IsDeadLockOccur(slotToGo, myDirection))) {
 		//kprintf("intersectionMonitor.slots[slotToGo] = %d\n", intersectionMonitor.slots[slotToGo]);
-		cv_signal(intersectionMonitor.waitFor[slotToGo],
+		cv_signal(intersectionMonitor.waitForSlot[slotToGo],
 				intersectionMonitor.intersectionLock);
-		cv_wait(intersectionMonitor.waitFor[slotToGo], 
+		cv_wait(intersectionMonitor.waitForSlot[slotToGo], 
 				intersectionMonitor.intersectionLock);
 	}
 	
 	intersectionMonitor.slots[slotToGo] = myDirection;
-	if (curSlot != NONE) {
+
+    assert(curSlot >= -4 && curSlot < 4);
+	if (curSlot >= 0 && curSlot < NONE) {
 		intersectionMonitor.slots[curSlot] = EMPTY;
-		cv_broadcast(intersectionMonitor.waitFor[curSlot],
+	    cv_signal(intersectionMonitor.waitForSlot[curSlot],
 				intersectionMonitor.intersectionLock);
-	}
+	} else {
+        int dirAppro = ~curSlot;
+        intersectionMonitor.appro[dirAppro] = 0;
+        cv_signal(intersectionMonitor.waitForAppro[dirAppro],
+                intersectionMonitor.intersectionLock);
+    }
 	
+    message(msg_nr, carnumber, src, dest);
 	lock_release(intersectionMonitor.intersectionLock);
 }
 
@@ -182,14 +204,16 @@ gostraight(unsigned long cardirection,
 	int slot2 = (cardirection + 3) % 4;
 	int dest = (cardirection + 2) % 4;
 	
+    // approching
+    Approching(cardirection);
 	message(APPROACHING, carnumber, cardirection, dest);
 	
 	// go to slot1
-	GoToSlot(NONE, cardirection, slot1);
+	GoToSlot(~cardirection, cardirection, slot1, REGION1, carnumber, cardirection, dest);
 	message(REGION1, carnumber, cardirection, dest);
 	
 	// go to slot2
-	GoToSlot(slot1, LEAVE, slot2);
+	GoToSlot(slot1, LEAVE, slot2,REGION2, carnumber, cardirection, dest);
 	message(REGION2, carnumber, cardirection, dest);
 	
 	// leave intersection
@@ -227,10 +251,12 @@ turnleft(unsigned long cardirection,
 	int turn = (cardirection + 3) % 4;
 	int dest = (cardirection + 1) % 4;
 	
+    // approching
+    Approching(cardirection);
 	message(APPROACHING, carnumber, cardirection, dest);
 	
 	// go to slot1
-	GoToSlot(NONE, cardirection, slot1);
+	GoToSlot(~cardirection, cardirection, slot1);
 	message(REGION1, carnumber, cardirection, dest);
 	
 	// go to slot2
@@ -273,10 +299,12 @@ turnright(unsigned long cardirection,
 	int slot1 = cardirection;
 	int dest = (cardirection + 3) % 4;
 	
+    // approching
+    Approching(cardirection);
 	message(APPROACHING, carnumber, cardirection, dest);
 	
 	// go to slot1
-	GoToSlot(NONE, LEAVE, slot1);
+	GoToSlot(~cardirection, LEAVE, slot1);
 	message(REGION1, carnumber, cardirection, dest);
 	
 	// leave intersection
@@ -366,8 +394,10 @@ createcars(int nargs,
 	// initialize variables
 	intersectionMonitor.intersectionLock = lock_create("");
 	for (index = 0; index < 4; index++ ) {
-		intersectionMonitor.waitFor[index] = cv_create("");
+		intersectionMonitor.waitForSlot[index] = cv_create("");
 		intersectionMonitor.slots[index] = EMPTY;
+        intersectionMonitor.waitForAppro[index] = cv_create("");
+        intersectionMonitor.appro[index] = 0;
 	}
 	
 	for (index = 0; index < NCARS; index++) {
