@@ -39,7 +39,8 @@
  * Function Definitions
  *
  */
-
+static void
+message(int msg_nr, int carnumber, int cardirection, int destdirection);
 enum { NW, NE, SE, SW, NONE};
 enum { N,  E,  S,  W,  EMPTY, LEAVE};
 
@@ -94,7 +95,7 @@ static int IsDeadLockOccur(int slotIndex, int direction)
 }
 
 static
-void LeavingSlot(int slotToLeave)
+void LeavingSlot(int slotToLeave, int msg_nr, int carnumber, int src, int dest)
 {
 	if (slotToLeave == NONE) return;
 	lock_acquire(intersectionMonitor.intersectionLock);
@@ -103,12 +104,12 @@ void LeavingSlot(int slotToLeave)
 	intersectionMonitor.slots[slotToLeave] = EMPTY;
 	cv_signal(intersectionMonitor.waitForSlot[slotToLeave],
 				intersectionMonitor.intersectionLock);
-	
+	message(msg_nr, carnumber, src, dest);
 	lock_release(intersectionMonitor.intersectionLock);
 }
 
 static
-void Approching(int direction){
+void Approching(int direction, int msg_nr, int carnumber, int src, int dest){
 	lock_acquire(intersectionMonitor.intersectionLock);
 
     if (intersectionMonitor.appro[direction] == 1) {
@@ -116,6 +117,7 @@ void Approching(int direction){
                 intersectionMonitor.intersectionLock);
     }
     intersectionMonitor.appro[direction] = 1;
+	message(msg_nr, carnumber, src, dest);
 	lock_release(intersectionMonitor.intersectionLock);
 }
 
@@ -205,20 +207,16 @@ gostraight(unsigned long cardirection,
 	int dest = (cardirection + 2) % 4;
 	
     // approching
-    Approching(cardirection);
-	message(APPROACHING, carnumber, cardirection, dest);
+    Approching(cardirection, APPROACHING, carnumber, cardirection, dest);
 	
 	// go to slot1
 	GoToSlot(~cardirection, cardirection, slot1, REGION1, carnumber, cardirection, dest);
-	message(REGION1, carnumber, cardirection, dest);
 	
 	// go to slot2
-	GoToSlot(slot1, LEAVE, slot2,REGION2, carnumber, cardirection, dest);
-	message(REGION2, carnumber, cardirection, dest);
+	GoToSlot(slot1, LEAVE, slot2, REGION2, carnumber, cardirection, dest);
 	
 	// leave intersection
-	LeavingSlot(slot2);
-	message(LEAVING, carnumber, cardirection, dest);
+	LeavingSlot(slot2, LEAVING, carnumber, cardirection, dest);
 }
 
 
@@ -252,25 +250,19 @@ turnleft(unsigned long cardirection,
 	int dest = (cardirection + 1) % 4;
 	
     // approching
-    Approching(cardirection);
-	message(APPROACHING, carnumber, cardirection, dest);
+    Approching(cardirection, APPROACHING, carnumber, cardirection, dest);
 	
 	// go to slot1
-	GoToSlot(~cardirection, cardirection, slot1);
-	message(REGION1, carnumber, cardirection, dest);
+	GoToSlot(~cardirection, cardirection, slot1, REGION1, carnumber, cardirection, dest);
 	
 	// go to slot2
-	GoToSlot(slot1, turn, slot2);
-	message(REGION2, carnumber, cardirection, dest);
+	GoToSlot(slot1, turn, slot2, REGION2, carnumber, cardirection, dest);
 	
 	// go to slot3
-	GoToSlot(slot2, LEAVE, slot3);
-	message(REGION3, carnumber, cardirection, dest);
+	GoToSlot(slot2, LEAVE, slot3, REGION3, carnumber, cardirection, dest);
 	
 	// leave slot3
-	LeavingSlot(slot3);
-	message(LEAVING, carnumber, cardirection, dest);
-	
+	LeavingSlot(slot3, LEAVING, carnumber, cardirection, dest);	
 }
 
 
@@ -300,17 +292,13 @@ turnright(unsigned long cardirection,
 	int dest = (cardirection + 3) % 4;
 	
     // approching
-    Approching(cardirection);
-	message(APPROACHING, carnumber, cardirection, dest);
+    Approching(cardirection, APPROACHING, carnumber, cardirection, dest);
 	
 	// go to slot1
-	GoToSlot(~cardirection, LEAVE, slot1);
-	message(REGION1, carnumber, cardirection, dest);
+	GoToSlot(~cardirection, LEAVE, slot1, REGION1, carnumber, cardirection, dest);
 	
 	// leave intersection
-	LeavingSlot(slot1);
-	message(LEAVING, carnumber, cardirection, dest);
-	
+	LeavingSlot(slot1, LEAVING, carnumber, cardirection, dest);	
 }
 
 
