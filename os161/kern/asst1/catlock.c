@@ -222,29 +222,6 @@ mouselock(void * unusedpointer,
  *      Driver code to start up catlock() and mouselock() threads.  Change
  *      this code as necessary for your solution.
  */
- 
-// static struct lock* l;
-// static
-// void test(void* v, unsigned long k)
-// {
-	// (void)v;
-    // int i, j;
-    // for(i = 0; i < 5; i++){
-        // thread_yield();
-        // lock_acquire(l);
-        // thread_yield();
-        // kprintf("\n");
-        // for(j = 0; j < k + 1; j++){
-            // thread_yield();
-            // kprintf("   ");
-            // thread_yield();
-        // }
-        // thread_yield();
-        // kprintf("%d", i);
-        // thread_yield();
-        // lock_release(l);
-    // }
-// }
 
 int
 catmouselock(int nargs,

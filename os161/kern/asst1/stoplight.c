@@ -63,18 +63,18 @@ static struct {
  * 
  */
 
-static
-void printslot()
-{
-	kprintf("%d %d %d %d %d %d %d %d\n", 	intersectionMonitor.slots[0],
-							intersectionMonitor.slots[1],
-							intersectionMonitor.slots[2],
-							intersectionMonitor.slots[3],
-							intersectionMonitor.appro[0],
-							intersectionMonitor.appro[1],
-							intersectionMonitor.appro[2],
-							intersectionMonitor.appro[3]);
-}
+// static
+// void printslot()
+// {
+	// kprintf("%d %d %d %d %d %d %d %d\n", 	intersectionMonitor.slots[0],
+							// intersectionMonitor.slots[1],
+							// intersectionMonitor.slots[2],
+							// intersectionMonitor.slots[3],
+							// intersectionMonitor.appro[0],
+							// intersectionMonitor.appro[1],
+							// intersectionMonitor.appro[2],
+							// intersectionMonitor.appro[3]);
+// }
 
 static int IsDeadLockOccur(int slotIndex, int direction)
 {

@@ -1,0 +1,12 @@
+solution.txt
+
+1. catsem: how to avoid starvation.
+	Both cats and mice can wait on bowls and they will be given a bowl base on the order they wait. Once a mouse gets a bowl, it will wait until there is no cat eating. Once a cat gets a bowl, it also will wait until there is no mouse eating. Because if two cats or two mice get the bowls on the wait sequence, the two cats or the two mice wouldn't need to wait. So this guarantees there is no starvation.
+	
+2. stoplight: how to avoid starvation.
+	a) when a car approches, it will check if there is a car already approches. if yes, than wait for the direction it approches. if no, it will wait for the first region it approches.
+	b) when a car leave the waitForApproch, whitch means it enter the first rigion, it signals the next car to approch. a) and b) ensures that cars will not overtake each other.
+	c) before a car enters the intersection, it checks if entering will cause dead lock and if the region has a car. If one of this is yes, it waits again.
+	d) before a car leaves a region, it signals the cv on that region, so another car can enter this region. c) and d) ensures that no deadlock and car crash will happen.
+	e) Because there are only 20 cars, so no starvation will happen.
+	

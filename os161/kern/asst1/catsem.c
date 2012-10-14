@@ -132,7 +132,6 @@ catsem(void * unusedpointer,
             P(bowl);
 
             P(sem);
-            
             while(1) {
                 if (nmice_eating != 0){
                     V(sem);
@@ -229,29 +228,6 @@ mousesem(void * unusedpointer,
  *      Driver code to start up catsem() and mousesem() threads.  Change this 
  *      code as necessary for your solution.
  */
-
-int total = 0;
-static
-void test(void* v, int k)
-{
-    int i, j;
-    for(i = 0; i < 5; i++){
-        thread_yield();
-        P(sem);
-        thread_yield();
-        kprintf("\n");
-        for(j = 0; j < k + 1; j++){
-            thread_yield();
-            kprintf("   ");
-            thread_yield();
-        }
-        thread_yield();
-        kprintf("%d", i);
-        thread_yield();
-        V(sem);
-    }
-}
-
 int
 catmousesem(int nargs,
             char ** args)
