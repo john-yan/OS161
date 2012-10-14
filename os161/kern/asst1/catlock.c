@@ -48,7 +48,6 @@
 static struct cv* waitForNoThreatOrBowl;
 static struct lock* mon;
 static int numOfMice = 0, numOfCat = 0;
-static int waitingMice = 0;
 
 static int bowls[] = {0, 0};
 

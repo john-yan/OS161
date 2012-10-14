@@ -127,7 +127,7 @@ catsem(void * unusedpointer,
         (void) unusedpointer;
         (void) catnumber;
         int i, mybowl;
-		kprintf("cat %d start\n", catnumber);
+		// kprintf("cat %d start\n", catnumber);
         for(i = 0; i < 4; i++){
             P(bowl);
 
