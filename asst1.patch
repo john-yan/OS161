@@ -1,0 +1,1366 @@
+Index: kern/include/lib.h
+===================================================================
+--- kern/include/lib.h	(.../tags/asst1-start)	(revision 10)
++++ kern/include/lib.h	(.../trunk)	(revision 10)
+@@ -199,7 +199,7 @@
+  * clocksleep() suspends execution for the requested number of seconds,
+  * like userlevel sleep(3). (Don't confuse it with thread_sleep.)
+  */
+-extern int lbolt;
++extern struct queue* lbolt;
+ void clocksleep(int seconds);
+ 
+ /*
+Index: kern/include/thread.h
+===================================================================
+--- kern/include/thread.h	(.../tags/asst1-start)	(revision 10)
++++ kern/include/thread.h	(.../trunk)	(revision 10)
+@@ -7,6 +7,7 @@
+ 
+ /* Get machine-dependent stuff */
+ #include <machine/pcb.h>
++#include <queue.h>
+ 
+ 
+ struct addrspace;
+@@ -18,7 +19,7 @@
+ 	
+ 	struct pcb t_pcb;
+ 	char *t_name;
+-	const void *t_sleepaddr;
++	struct queue* t_sleepaddr;
+ 	char *t_stack;
+ 	
+ 	/**********************************************************/
+@@ -82,19 +83,24 @@
+  * address is treated as a key and is not interpreted or dereferenced.
+  * Interrupts must be disabled.
+  */
+-void thread_sleep(const void *addr);
++void thread_sleep(struct queue *waitqueue);
+ 
+ /*
+- * Cause all threads sleeping on the specified address to wake up.
++ * Cause one thread sleeping on the specified address to wake up.
+  * Interrupts must be disabled.
+  */
+-void thread_wakeup(const void *addr);
++void thread_wakeup(struct queue *waitqueue);
+ 
+ /*
++ * Cause all threads being waked up.
++ */
++void thread_wakeupAll(struct queue *waitqueue);
++
++/*
+  * Return nonzero if there are any threads sleeping on the specified
+  * address. Meant only for diagnostic purposes.
+  */
+-int thread_hassleepers(const void *addr);
++int thread_hassleepers(struct queue *waitqueue);
+ 
+ 
+ /*
+Index: kern/include/test.h
+===================================================================
+--- kern/include/test.h	(.../tags/asst1-start)	(revision 10)
++++ kern/include/test.h	(.../trunk)	(revision 10)
+@@ -1,10 +1,11 @@
+ #ifndef _TEST_H_
+ #define _TEST_H_
+-
++#include <synch.h>
+ /*
+  * Declarations for test code and other miscellaneous functions.
+  */
+ 
++extern struct semphore* cmdSem;
+ 
+ /* These are only actually available if OPT_SYNCHPROBS is set. */
+ int catmousesem(int, char **);
+Index: kern/include/synch.h
+===================================================================
+--- kern/include/synch.h	(.../tags/asst1-start)	(revision 10)
++++ kern/include/synch.h	(.../trunk)	(revision 10)
+@@ -20,6 +20,7 @@
+ 
+ struct semaphore {
+ 	char *name;
++    struct queue* waitqueue;
+ 	volatile int count;
+ };
+ 
+@@ -50,6 +51,8 @@
+ 
+ struct lock {
+ 	char *name;
++    volatile struct thread *holdingThread;
++    struct queue *waitqueue;
+ 	// add what you need here
+ 	// (don't forget to mark things volatile as needed)
+ };
+@@ -89,6 +92,7 @@
+ 
+ struct cv {
+ 	char *name;
++    struct queue* waitqueue;
+ 	// add what you need here
+ 	// (don't forget to mark things volatile as needed)
+ };
+Index: kern/main/menu.c
+===================================================================
+--- kern/main/menu.c	(.../tags/asst1-start)	(revision 10)
++++ kern/main/menu.c	(.../trunk)	(revision 10)
+@@ -604,6 +604,7 @@
+ 	{ NULL, NULL }
+ };
+ 
++struct semphore* cmdSem = NULL;
+ /*
+  * Process a single command.
+  */
+@@ -611,6 +612,7 @@
+ int
+ cmd_dispatch(char *cmd)
+ {
++	if (!cmdSem) cmdSem = sem_create("", 0);
+ 	time_t beforesecs, aftersecs, secs;
+ 	u_int32_t beforensecs, afternsecs, nsecs;
+ 	char *args[MAXMENUARGS];
+Index: kern/lib/kprintf.c
+===================================================================
+--- kern/lib/kprintf.c	(.../tags/asst1-start)	(revision 10)
++++ kern/lib/kprintf.c	(.../trunk)	(revision 10)
+@@ -52,6 +52,7 @@
+ {
+ 	int chars;
+ 	va_list ap;
++    //int spl = splhigh();
+ 
+ 	if (kprintf_lock != NULL && !in_interrupt && curspl==0) {
+ 		lock_acquire(kprintf_lock);
+@@ -65,6 +66,7 @@
+ 		lock_release(kprintf_lock);
+ 	}
+ 
++    //splx(spl);
+ 	return chars;
+ }
+ 
+@@ -118,6 +120,7 @@
+ 		va_end(ap);
+ 	}
+ 
++    //for(;;);
+ 	if (evil==3) {
+ 		evil = 4;
+ 
+Index: kern/thread/synch.c
+===================================================================
+--- kern/thread/synch.c	(.../tags/asst1-start)	(revision 10)
++++ kern/thread/synch.c	(.../trunk)	(revision 10)
+@@ -9,6 +9,7 @@
+ #include <thread.h>
+ #include <curthread.h>
+ #include <machine/spl.h>
++#include <queue.h>
+ 
+ ////////////////////////////////////////////////////////////
+ //
+@@ -32,6 +33,7 @@
+ 		return NULL;
+ 	}
+ 
++    sem->waitqueue = q_create(1);
+ 	sem->count = initial_count;
+ 	return sem;
+ }
+@@ -43,7 +45,7 @@
+ 	assert(sem != NULL);
+ 
+ 	spl = splhigh();
+-	assert(thread_hassleepers(sem)==0);
++	assert(thread_hassleepers(sem->waitqueue)==0);
+ 	splx(spl);
+ 
+ 	/*
+@@ -55,6 +57,7 @@
+ 	 * including the kfrees in the splhigh block, so we don't.
+ 	 */
+ 
++    q_destroy(sem->waitqueue);
+ 	kfree(sem->name);
+ 	kfree(sem);
+ }
+@@ -75,7 +78,7 @@
+ 
+ 	spl = splhigh();
+ 	while (sem->count==0) {
+-		thread_sleep(sem);
++		thread_sleep(sem->waitqueue);
+ 	}
+ 	assert(sem->count>0);
+ 	sem->count--;
+@@ -90,7 +93,7 @@
+ 	spl = splhigh();
+ 	sem->count++;
+ 	assert(sem->count>0);
+-	thread_wakeup(sem);
++	thread_wakeup(sem->waitqueue);
+ 	splx(spl);
+ }
+ 
+@@ -114,6 +117,13 @@
+ 		return NULL;
+ 	}
+ 	
++    lock->holdingThread = NULL;
++    lock->waitqueue = q_create(1);
++    if (lock->waitqueue == NULL) {
++        kfree(lock->name);
++        kfree(lock);
++        return NULL;
++    }
+ 	// add stuff here as needed
+ 	
+ 	return lock;
+@@ -123,9 +133,11 @@
+ lock_destroy(struct lock *lock)
+ {
+ 	assert(lock != NULL);
++    assert(lock->holdingThread == NULL);
++    assert(q_empty(lock->waitqueue));
+ 
+ 	// add stuff here as needed
+-	
++	q_destroy(lock->waitqueue);
+ 	kfree(lock->name);
+ 	kfree(lock);
+ }
+@@ -133,27 +145,59 @@
+ void
+ lock_acquire(struct lock *lock)
+ {
+-	// Write this
++	assert(lock != NULL);
+ 
++    // disable interrupt
++    int spl;
++    spl = splhigh();
++
++    if (lock->holdingThread != curthread) {
++        // if the current thread is the holding thread,
++        // then nothing needed to be done.
++        
++        // if the holding thread is NULL,
++        // then we can hold it and return.
++        // otherwise, someone has already held it,
++        // then we go to sleep.
++        while (lock->holdingThread != NULL){
++            thread_sleep(lock->waitqueue);
++        }
++
++
++        lock->holdingThread = curthread;
++    }
++    // enable interrupt
++    splx(spl);
++
+ 	(void)lock;  // suppress warning until code gets written
+ }
+ 
+ void
+ lock_release(struct lock *lock)
+ {
+-	// Write this
++    assert(lock != NULL);
++    assert(lock->holdingThread == curthread);
+ 
+-	(void)lock;  // suppress warning until code gets written
++    int spl;
++
++    // disable int
++    spl = splhigh();
++
++    // first release the lock by setting holdingThread to NULL
++    // then wakeup one thread (if has any) in the waitqueue.
++    lock->holdingThread = NULL;
++    thread_wakeup(lock->waitqueue);
++
++    // enable int
++    splx(spl);
+ }
+ 
+ int
+ lock_do_i_hold(struct lock *lock)
+ {
+-	// Write this
++    assert(lock != NULL);
+ 
+-	(void)lock;  // suppress warning until code gets written
+-
+-	return 1;    // dummy until code gets written
++    return lock->holdingThread == curthread;
+ }
+ 
+ ////////////////////////////////////////////////////////////
+@@ -177,7 +221,12 @@
+ 		return NULL;
+ 	}
+ 	
+-	// add stuff here as needed
++    cv->waitqueue = q_create(5);
++    if (cv->waitqueue == NULL) {
++        kfree(cv->name);
++        kfree(cv);
++        return NULL;
++    }
+ 	
+ 	return cv;
+ }
+@@ -187,8 +236,7 @@
+ {
+ 	assert(cv != NULL);
+ 
+-	// add stuff here as needed
+-	
++    q_destroy(cv->waitqueue);
+ 	kfree(cv->name);
+ 	kfree(cv);
+ }
+@@ -196,23 +244,57 @@
+ void
+ cv_wait(struct cv *cv, struct lock *lock)
+ {
+-	// Write this
+-	(void)cv;    // suppress warning until code gets written
+-	(void)lock;  // suppress warning until code gets written
++    assert(cv != NULL);
++    assert(lock != NULL);
++
++    int spl;
++
++    // disable int
++    spl = splhigh();
++
++    // we must own the lock
++    assert(lock->holdingThread == curthread);
++    
++    lock_release(lock);
++    thread_sleep(cv->waitqueue);
++    lock_acquire(lock);
++    
++    // enable int
++    splx(spl);
+ }
+ 
+ void
+ cv_signal(struct cv *cv, struct lock *lock)
+ {
+-	// Write this
+-	(void)cv;    // suppress warning until code gets written
+-	(void)lock;  // suppress warning until code gets written
++    assert(cv != NULL);
++    assert(lock != NULL);
++
++    int spl;
++    // disable int
++    spl = splhigh();
++
++    if (!q_empty(cv->waitqueue)) {
++        thread_wakeup(cv->waitqueue);
++    }
++
++    // enable int
++    splx(spl);
++
+ }
+ 
+ void
+ cv_broadcast(struct cv *cv, struct lock *lock)
+ {
+-	// Write this
+-	(void)cv;    // suppress warning until code gets written
+-	(void)lock;  // suppress warning until code gets written
++    assert(cv!=NULL);
++    assert(lock!=NULL);
++
++    int spl;
++
++    // disable int
++    spl = splhigh();
++    
++    thread_wakeupAll(cv->waitqueue);
++
++    // enable int
++    splx(spl);
+ }
+Index: kern/thread/thread.c
+===================================================================
+--- kern/thread/thread.c	(.../tags/asst1-start)	(revision 10)
++++ kern/thread/thread.c	(.../trunk)	(revision 10)
+@@ -13,6 +13,7 @@
+ #include <addrspace.h>
+ #include <vnode.h>
+ #include "opt-synchprobs.h"
++#include <queue.h>
+ 
+ /* States a thread can be in. */
+ typedef enum {
+@@ -132,9 +133,9 @@
+ 	 * wake up while we're shutting down.
+ 	 */
+ 
+-	for (i=0; i<array_getnum(sleepers); i++) {
+-		struct thread *t = array_getguy(sleepers, i);
+-		kprintf("sleep: Dropping thread %s\n", t->t_name);
++	//for (i=0; i<array_getnum(sleepers); i++) {
++	//	struct thread *t = array_getguy(sleepers, i);
++	//	kprintf("sleep: Dropping thread %s\n", t->t_name);
+ 
+ 		/*
+ 		 * Don't do this: because these threads haven't
+@@ -144,11 +145,11 @@
+ 		 *
+ 		 * array_add(zombies, t);
+ 		 */
+-	}
++	//}
+ 
+-	result = array_setsize(sleepers, 0);
++	//result = array_setsize(sleepers, 0);
+ 	/* shrinking array: not supposed to fail */
+-	assert(result==0);
++	//assert(result==0);
+ }
+ 
+ /*
+@@ -380,7 +381,7 @@
+ 		 * Because we preallocate sleepers[] during thread_fork,
+ 		 * this should never fail.
+ 		 */
+-		result = array_add(sleepers, cur);
++		//result = array_add(sleepers, cur);
+ 	}
+ 	else {
+ 		assert(nextstate==S_ZOMB);
+@@ -475,7 +476,7 @@
+ 	int spl = splhigh();
+ 
+ 	/* Check sleepers just in case we get here after shutdown */
+-	assert(sleepers != NULL);
++	//assert(sleepers != NULL);
+ 
+ 	mi_switch(S_READY);
+ 	splx(spl);
+@@ -493,30 +494,53 @@
+  * interrupt handler.
+  */
+ void
+-thread_sleep(const void *addr)
++thread_sleep(struct queue* waitqueue)
+ {
+ 	// may not sleep in an interrupt handler
+ 	assert(in_interrupt==0);
+-	
+-	curthread->t_sleepaddr = addr;
++	assert(waitqueue != NULL);
++    assert(curthread != NULL);
++
++    // disable interrupt
++    int spl;
++    spl = splhigh();
++
++	curthread->t_sleepaddr = waitqueue;
++    q_addtail(waitqueue, curthread);
+ 	mi_switch(S_SLEEP);
+ 	curthread->t_sleepaddr = NULL;
++
++    // enable int
++    splx(spl);
+ }
+ 
+ /*
+- * Wake up one or more threads who are sleeping on "sleep address"
+- * ADDR.
++ * Wake up one thread who is sleeping on the waitqueue.
+  */
+ void
+-thread_wakeup(const void *addr)
++thread_wakeup(struct queue *waitqueue)
+ {
+-	int i, result;
++	int i, result, spl;
+ 	
++    assert(waitqueue != NULL);
+ 	// meant to be called with interrupts off
+-	assert(curspl>0);
++	//assert(curspl>0);
+ 	
++    // disable int
++    spl = splhigh();
++
++    // just wakeup the next waiting thread in the queue.
++    if (!q_empty(waitqueue)){
++        struct thread* wakeupThread = q_remhead(waitqueue);
++        assert(wakeupThread != NULL);
++        result = make_runnable(wakeupThread);
++        assert(result == 0);
++    }
++    // enable int
++    splx(spl);
++
+ 	// This is inefficient. Feel free to improve it.
+-	
++	/* improved
+ 	for (i=0; i<array_getnum(sleepers); i++) {
+ 		struct thread *t = array_getguy(sleepers, i);
+ 		if (t->t_sleepaddr == addr) {
+@@ -527,35 +551,57 @@
+ 			// must look at the same sleepers[i] again
+ 			i--;
+ 
+-			/*
++			/ *
+ 			 * Because we preallocate during thread_fork,
+ 			 * this should never fail.
+-			 */
++			 * /
+ 			result = make_runnable(t);
+ 			assert(result==0);
+ 		}
+ 	}
++    */
+ }
+ 
+ /*
++ * Wakeup all threads in the waitqueue
++ */
++void
++thread_wakeupAll(struct queue *waitqueue)
++{
++	int result, spl;
++	
++    assert(waitqueue != NULL);
++	// meant to be called with interrupts off
++	//assert(curspl>0);
++	
++    // disable int
++    spl = splhigh();
++
++    // just wakeup the next waiting thread in the queue.
++    while (!q_empty(waitqueue)){
++        struct thread* wakeupThread = q_remhead(waitqueue);
++        assert(wakeupThread != NULL);
++        result = make_runnable(wakeupThread);
++        assert(result == 0);
++    }
++
++    // enable int
++    splx(spl);
++}
++
++/*
+  * Return nonzero if there are any threads who are sleeping on "sleep address"
+  * ADDR. This is meant to be used only for diagnostic purposes.
+  */
+ int
+-thread_hassleepers(const void *addr)
++thread_hassleepers(struct queue *waitqueue)
+ {
+ 	int i;
+ 	
+ 	// meant to be called with interrupts off
+ 	assert(curspl>0);
+ 	
+-	for (i=0; i<array_getnum(sleepers); i++) {
+-		struct thread *t = array_getguy(sleepers, i);
+-		if (t->t_sleepaddr == addr) {
+-			return 1;
+-		}
+-	}
+-	return 0;
++    return q_empty(waitqueue);
+ }
+ 
+ /*
+Index: kern/thread/hardclock.c
+===================================================================
+--- kern/thread/hardclock.c	(.../tags/asst1-start)	(revision 10)
++++ kern/thread/hardclock.c	(.../trunk)	(revision 10)
+@@ -7,7 +7,8 @@
+ /* 
+  * The address of lbolt has thread_wakeup called on it once a second.
+  */
+-int lbolt;
++struct queue *lbolt;
++static int first = 1;
+ 
+ static int lbolt_counter;
+ 
+@@ -23,10 +24,12 @@
+ 	 */
+ 
+ 
++    if(first) lbolt = q_create(1);
++    first = 0;
+ 	lbolt_counter++;
+ 	if (lbolt_counter >= HZ) {
+ 		lbolt_counter = 0;
+-		thread_wakeup(&lbolt);
++		thread_wakeup(lbolt);
+ 	}
+ 
+ 	thread_yield();
+@@ -40,9 +43,11 @@
+ {
+ 	int s;
+ 
++    if(first) lbolt = q_create(1);
++    first = 0;
+ 	s = splhigh();
+ 	while (num_secs > 0) {
+-		thread_sleep(&lbolt);
++		thread_sleep(lbolt);
+ 		num_secs--;
+ 	}
+ 	splx(s);
+Index: kern/asst1/catlock.c
+===================================================================
+--- kern/asst1/catlock.c	(.../tags/asst1-start)	(revision 10)
++++ kern/asst1/catlock.c	(.../trunk)	(revision 10)
+@@ -18,6 +18,7 @@
+ #include <lib.h>
+ #include <test.h>
+ #include <thread.h>
++#include <synch.h>
+ 
+ 
+ /*
+@@ -44,7 +45,41 @@
+ 
+ #define NMICE 2
+ 
++static struct cv* waitForNoThreatOrBowl;
++static struct lock* mon;
++static int numOfMice = 0, numOfCat = 0;
+ 
++static int bowls[] = {0, 0};
++
++static
++int hasbowl()
++{
++	return bowls[0] == 0 || bowls[1] == 0;
++}
++
++static
++int getbowl()
++{
++    if (bowls[0] == 0) {
++        bowls[0] = 1;
++        return 0;
++    } else if (bowls[1] == 0){
++        bowls[1] = 1;
++        return 1;
++    } else {
++        return -1;
++    }
++}
++
++static 
++void retbowl(int i)
++{
++    if (bowls[i] == 1) {
++        bowls[i] = 0;
++    } else {
++        panic("the bowl isn't held by anyone.\n");
++    }
++}
+ /*
+  * 
+  * Function Definitions
+@@ -52,12 +87,17 @@
+  */
+ 
+ /* who should be "cat" or "mouse" */
+-void
+-eat(const char *who, int num, int iteration)
++static void
++lock_eat(const char *who, int num, int bowl, int iteration)
+ {
+-        kprintf("%s: %d starts eating: %d\n", who, num, iteration);
+-        clocksleep(1);
+-        kprintf("%s: %d ends eating: %d\n", who, num, iteration);
++        kprintf("%s: %d starts eating: bowl %d, iteration %d\n", who, num, 
++                bowl, iteration);
++		int i;
++		for (i = 0; i < 100; i ++)
++			thread_yield();
++        // clocksleep(1);
++        kprintf("%s: %d ends eating: bowl %d, iteration %d\n", who, num, 
++                bowl, iteration);
+ }
+ 
+ /*
+@@ -87,6 +127,29 @@
+ 
+         (void) unusedpointer;
+         (void) catnumber;
++		int i;
++		int mybowl;
++		// kprintf("cat %d start\n", catnumber);
++		for(i = 0; i < 4; i++) {
++			lock_acquire(mon);
++			while(1){
++				if (numOfMice != 0 ||  !hasbowl())
++					cv_wait(waitForNoThreatOrBowl, mon);
++				else
++					break;
++			}
++			numOfCat ++;
++			mybowl = getbowl();
++			lock_release(mon);
++			
++			lock_eat("cat", catnumber, mybowl + 1, i);
++			
++			lock_acquire(mon);
++			retbowl(mybowl);
++			numOfCat --;
++			cv_signal(waitForNoThreatOrBowl, mon);
++			lock_release(mon);
++		}
+ }
+ 	
+ 
+@@ -117,6 +180,30 @@
+         
+         (void) unusedpointer;
+         (void) mousenumber;
++		
++		int i;
++		int mybowl;
++		for(i = 0; i < 4; i++) {
++			lock_acquire(mon);
++			while(1){
++				if (numOfCat != 0 || !hasbowl())
++					cv_wait(waitForNoThreatOrBowl, mon);
++				else
++					break;
++			}
++			numOfMice ++;
++			mybowl = getbowl();
++			lock_release(mon);
++			
++			lock_eat("mouse", mousenumber, mybowl + 1, i);
++			
++			lock_acquire(mon);
++			retbowl(mybowl);
++			numOfMice --;
++			cv_signal(waitForNoThreatOrBowl, mon);
++			lock_release(mon);
++		}
++		
+ }
+ 
+ 
+@@ -151,7 +238,21 @@
+         /*
+          * Start NCATS catlock() threads.
+          */
++		 
++		// l = lock_create("");
++		// for (index = 0; index < 2000; index++)
++            // thread_yield();
+ 
++
++        // for (index = 0; index < 10; index ++) {
++           // thread_fork("", NULL, index, test, NULL);
++        // }
++
++        // return 0;
++		
++		mon = lock_create("");
++		waitForNoThreatOrBowl = cv_create("");
++		
+         for (index = 0; index < NCATS; index++) {
+            
+                 error = thread_fork("catlock thread", 
+Index: kern/asst1/catsem.c
+===================================================================
+--- kern/asst1/catsem.c	(.../tags/asst1-start)	(revision 10)
++++ kern/asst1/catsem.c	(.../trunk)	(revision 10)
+@@ -18,6 +18,7 @@
+ #include <lib.h>
+ #include <test.h>
+ #include <thread.h>
++#include <synch.h>
+ 
+ 
+ /*
+@@ -44,7 +45,44 @@
+ 
+ #define NMICE 2
+ 
++static int bowls[] = {0, 0};
++static int ncats_eating = 0;
++static int nmice_eating = 0;
+ 
++static struct semaphore *sem;
++static struct semaphore *bowl_sem;
++static struct semaphore *bowl;
++
++static
++int getbowl()
++{
++	int i;
++    P(bowl_sem);
++    if (bowls[0] == 0) {
++        bowls[0] = 1;
++        i = 0;
++    } else if (bowls[1] == 0){
++        bowls[1] = 1;
++        i = 1;
++    } else {
++        panic("can't find a empty bowl.\n");
++        i = -1;
++    }
++    V(bowl_sem);
++	return i;
++}
++
++static 
++void retbowl(int i)
++{
++    P(bowl_sem);
++    if (bowls[i] == 1) {
++        bowls[i] = 0;
++    } else {
++        panic("the bowl isn't held by anyone.\n");
++    }
++    V(bowl_sem);
++}
+ /*
+  * 
+  * Function Definitions
+@@ -52,15 +90,16 @@
+  */
+ 
+ /* who should be "cat" or "mouse" */
+-void
+-eat(const char *who, int num, int iteration)
++static void
++sem_eat(const char *who, int num, int bowl, int iteration)
+ {
+-        kprintf("%s: %d starts eating: %d\n", who, num, iteration);
+-        clocksleep(1);
+-        kprintf("%s: %d ends eating: %d\n", who, num, iteration);
++        kprintf("%s: %d starts eating: bowl %d, iteration %d\n", who, num, 
++                bowl, iteration);
++		clocksleep(1);
++        kprintf("%s: %d ends eating: bowl %d, iteration %d\n", who, num, 
++                bowl, iteration);
+ }
+ 
+-
+ /*
+  * catsem()
+  *
+@@ -87,6 +126,34 @@
+ 
+         (void) unusedpointer;
+         (void) catnumber;
++        int i, mybowl;
++		// kprintf("cat %d start\n", catnumber);
++        for(i = 0; i < 4; i++){
++            P(bowl);
++
++            P(sem);
++            while(1) {
++                if (nmice_eating != 0){
++                    V(sem);
++                    thread_yield();
++                    P(sem);
++                } else {
++					ncats_eating++;
++                    break;
++                }
++            }
++            V(sem);
++
++            mybowl = getbowl();
++            sem_eat("cat", catnumber, mybowl + 1, i);
++
++            P(sem);
++            ncats_eating--;
++            V(sem);
++
++            retbowl(mybowl);
++            V(bowl);
++        }
+ }
+         
+ 
+@@ -117,6 +184,33 @@
+ 
+         (void) unusedpointer;
+         (void) mousenumber;
++        int i, mybowl;
++        for(i = 0; i < 4; i++){
++            P(bowl);
++
++            P(sem);
++            while (1){
++                if (ncats_eating != 0){
++                    V(sem);
++                    thread_yield();
++                    P(sem);
++                } else {
++                    nmice_eating++;
++                    break;
++                }
++            }
++            V(sem);
++
++            mybowl = getbowl();
++            sem_eat("mouse", mousenumber, mybowl + 1, i);
++
++            P(sem);
++            nmice_eating--;
++            V(sem);
++
++            retbowl(mybowl);
++            V(bowl);
++        }
+ }
+ 
+ 
+@@ -134,7 +228,6 @@
+  *      Driver code to start up catsem() and mousesem() threads.  Change this 
+  *      code as necessary for your solution.
+  */
+-
+ int
+ catmousesem(int nargs,
+             char ** args)
+@@ -151,7 +244,20 @@
+         /*
+          * Start NCATS catsem() threads.
+          */
++        sem = sem_create("sem", 1);
++        bowl = sem_create("bowl", 2);
++        bowl_sem = sem_create("bowl_sem", 1);
++        
++        for (index = 0; index < 1000; index++)
++            thread_yield();
+ 
++
++        //for (index = 0; index < 10; index ++) {
++        //    thread_fork("", NULL, index, test, NULL);
++        //}
++
++        //return 0;
++
+         for (index = 0; index < NCATS; index++) {
+            
+                 error = thread_fork("catsem Thread", 
+Index: kern/asst1/stoplight.c
+===================================================================
+--- kern/asst1/stoplight.c	(.../tags/asst1-start)	(revision 10)
++++ kern/asst1/stoplight.c	(.../trunk)	(revision 10)
+@@ -18,6 +18,7 @@
+ #include <lib.h>
+ #include <test.h>
+ #include <thread.h>
++#include <synch.h>
+ 
+ 
+ /*
+@@ -32,21 +33,154 @@
+ 
+ #define NCARS 20
+ 
++#define ISDIR(X) ((X) < 0)
++#define ISSLOT(X) ((X) >= 0)
++#define GETDIR(X) (~(X))
+ 
+ /*
+  *
+  * Function Definitions
+  *
+  */
++static void
++message(int msg_nr, int carnumber, int cardirection, int destdirection);
++enum { NW, NE, SE, SW, NONE};
++enum { N,  E,  S,  W,  EMPTY, LEAVE};
+ 
++static struct {
++	struct lock* intersectionLock;
++	struct cv* waitForSlot[4];
++    struct cv* waitForAppro[4];
++    int appro[4];
++	int slots[4];
++} intersectionMonitor;
++
++/*
++ * the function checks deadlock when a car is approching the
++ * intersection. 
++ * 
++ * return 0 if no deadlock, return 1 otherwise.
++ * 
++ */
++
++// static
++// void printslot()
++// {
++	// kprintf("%d %d %d %d %d %d %d %d\n", 	intersectionMonitor.slots[0],
++							// intersectionMonitor.slots[1],
++							// intersectionMonitor.slots[2],
++							// intersectionMonitor.slots[3],
++							// intersectionMonitor.appro[0],
++							// intersectionMonitor.appro[1],
++							// intersectionMonitor.appro[2],
++							// intersectionMonitor.appro[3]);
++// }
++
++static int IsDeadLockOccur(int slotIndex, int direction)
++{
++	// assert the calling function holds the monitor lock
++	assert(lock_do_i_hold(intersectionMonitor.intersectionLock));
++	assert(intersectionMonitor.slots[slotIndex] == EMPTY);
++	assert(slotIndex >= NW && slotIndex <= SW);
++	intersectionMonitor.slots[slotIndex] = direction;
++	
++	// check if N = NW, E = NE, SE = S, SW = W occur.
++	int i;
++	for (i = 0; i < 4; i++) {
++		if (intersectionMonitor.slots[i] != i) {
++			intersectionMonitor.slots[slotIndex] = EMPTY;
++			return 0;
++		}
++	}
++	// kprintf("deadlock detect: ");
++	// printslot();
++	// kprintf(" <- ");
++	intersectionMonitor.slots[slotIndex] = EMPTY;
++	// printslot();
++	// kprintf("\n");
++	return 1;
++}
++
++static
++void LeavingSlot(int slotToLeave, int msg_nr, int carnumber, int src, int dest)
++{
++	if (slotToLeave == NONE) return;
++	lock_acquire(intersectionMonitor.intersectionLock);
++	
++	assert(slotToLeave >= NW && slotToLeave <= SW);
++	intersectionMonitor.slots[slotToLeave] = EMPTY;
++	cv_signal(intersectionMonitor.waitForSlot[slotToLeave],
++				intersectionMonitor.intersectionLock);
++	message(msg_nr, carnumber, src, dest);
++	lock_release(intersectionMonitor.intersectionLock);
++}
++
++static
++void Approching(int direction, int msg_nr, int carnumber, int src, int dest){
++	// assert(direction == 0);
++	assert(direction < 4 && direction >= 0);
++	lock_acquire(intersectionMonitor.intersectionLock);
++	intersectionMonitor.appro[direction] ++;
++	message(msg_nr, carnumber, src, dest);
++    if (intersectionMonitor.appro[direction] > 1) {
++        cv_wait(intersectionMonitor.waitForAppro[direction],
++                intersectionMonitor.intersectionLock);
++    }
++	
++	lock_release(intersectionMonitor.intersectionLock);
++}
++
++static 
++void GoToSlot(int curState, int myDirection, int slotToGo, int msg_nr, int carnumber, int src, int dest)
++{
++	lock_acquire(intersectionMonitor.intersectionLock);
++	assert(curState >= -4 && curState < 4);
++	// check if deadlock occur, if so, wait
++	while (intersectionMonitor.slots[slotToGo] != EMPTY
++			|| ( !ISSLOT(curState) && IsDeadLockOccur(slotToGo, myDirection))) {
++		//kprintf("intersectionMonitor.slots[slotToGo] = %d\n", intersectionMonitor.slots[slotToGo]);
++		cv_signal(intersectionMonitor.waitForSlot[slotToGo],
++				intersectionMonitor.intersectionLock);
++		cv_wait(intersectionMonitor.waitForSlot[slotToGo], 
++				intersectionMonitor.intersectionLock);
++	}
++	
++	intersectionMonitor.slots[slotToGo] = myDirection;
++
++	if (ISSLOT(curState)) {
++		intersectionMonitor.slots[curState] = EMPTY;
++	    cv_signal(intersectionMonitor.waitForSlot[curState],
++				intersectionMonitor.intersectionLock);
++	} else {
++        int dirAppro = GETDIR(curState);
++        intersectionMonitor.appro[dirAppro] --;
++        cv_signal(intersectionMonitor.waitForAppro[dirAppro],
++                intersectionMonitor.intersectionLock);
++    }
++	
++    message(msg_nr, carnumber, src, dest);
++	lock_release(intersectionMonitor.intersectionLock);
++}
++
+ static const char *directions[] = { "N", "E", "S", "W" };
+ 
+-/* str should be "approaching", "entering" or "leaving" */
+-void
+-message(const char *str, int carnumber, int cardirection, int destdirection)
++static const char *msgs[] = {
++        "                              approaching:",
++        "                       region1:    ",
++        "                region2:    ",
++        "        region3:    ",
++        "leaving:    "
++};
++
++/* use these constants for the first parameter of message */
++enum { APPROACHING, REGION1, REGION2, REGION3, LEAVING };
++
++static void
++message(int msg_nr, int carnumber, int cardirection, int destdirection)
+ {
+-        kprintf("%s: car = %d, direction = %s, destination = %s\n", str, 
+-                carnumber, directions[cardirection], directions[destdirection]);
++	kprintf("%s car = %2d, direction = %s, destination = %s\n",
++			msgs[msg_nr], carnumber,
++			directions[cardirection], directions[destdirection]);
+ }
+  
+ /*
+@@ -71,12 +205,21 @@
+ gostraight(unsigned long cardirection,
+            unsigned long carnumber)
+ {
+-        /*
+-         * Avoid unused variable warnings.
+-         */
+-        
+-        (void) cardirection;
+-        (void) carnumber;
++	int slot1 = cardirection;
++	int slot2 = (cardirection + 3) % 4;
++	int dest = (cardirection + 2) % 4;
++	
++    // approching
++    Approching(cardirection, APPROACHING, carnumber, cardirection, dest);
++	
++	// go to slot1
++	GoToSlot(GETDIR(cardirection), cardirection, slot1, REGION1, carnumber, cardirection, dest);
++	
++	// go to slot2
++	GoToSlot(slot1, LEAVE, slot2, REGION2, carnumber, cardirection, dest);
++	
++	// leave intersection
++	LeavingSlot(slot2, LEAVING, carnumber, cardirection, dest);
+ }
+ 
+ 
+@@ -102,12 +245,27 @@
+ turnleft(unsigned long cardirection,
+          unsigned long carnumber)
+ {
+-        /*
+-         * Avoid unused variable warnings.
+-         */
+-
+-        (void) cardirection;
+-        (void) carnumber;
++	int slot1 = cardirection;
++	int slot2 = (cardirection + 3) % 4;
++	int slot3 = (cardirection + 2) % 4;
++	
++	int turn = (cardirection + 3) % 4;
++	int dest = (cardirection + 1) % 4;
++	
++    // approching
++    Approching(cardirection, APPROACHING, carnumber, cardirection, dest);
++	
++	// go to slot1
++	GoToSlot(GETDIR(cardirection), cardirection, slot1, REGION1, carnumber, cardirection, dest);
++	
++	// go to slot2
++	GoToSlot(slot1, turn, slot2, REGION2, carnumber, cardirection, dest);
++	
++	// go to slot3
++	GoToSlot(slot2, LEAVE, slot3, REGION3, carnumber, cardirection, dest);
++	
++	// leave slot3
++	LeavingSlot(slot3, LEAVING, carnumber, cardirection, dest);	
+ }
+ 
+ 
+@@ -133,12 +291,17 @@
+ turnright(unsigned long cardirection,
+           unsigned long carnumber)
+ {
+-        /*
+-         * Avoid unused variable warnings.
+-         */
+-
+-        (void) cardirection;
+-        (void) carnumber;
++	int slot1 = cardirection;
++	int dest = (cardirection + 3) % 4;
++	
++    // approching
++    Approching(cardirection, APPROACHING, carnumber, cardirection, dest);
++	
++	// go to slot1
++	GoToSlot(GETDIR(cardirection), LEAVE, slot1, REGION1, carnumber, cardirection, dest);
++	
++	// leave intersection
++	LeavingSlot(slot1, LEAVING, carnumber, cardirection, dest);	
+ }
+ 
+ 
+@@ -167,23 +330,25 @@
+ approachintersection(void * unusedpointer,
+                      unsigned long carnumber)
+ {
+-        int cardirection;
+-
+-        /*
+-         * Avoid unused variable and function warnings.
+-         */
+-
+-        (void) unusedpointer;
+-        (void) carnumber;
+-	(void) gostraight;
+-	(void) turnleft;
+-	(void) turnright;
+-
+-        /*
+-         * cardirection is set randomly.
+-         */
+-
+-        cardirection = random() % 4;
++	(void) unusedpointer;
++	int cardirection = random() % 4;
++	int turn;
++	
++	while (1) {
++		turn = random() % 4;
++		if (turn == (cardirection + 2) % 4) {
++			gostraight(cardirection, carnumber);
++			break;
++		}
++		else if (turn == (cardirection + 1) % 4){
++			turnleft(cardirection, carnumber);
++			break;
++		}
++		else if (turn == (cardirection + 3) % 4) {
++			turnright(cardirection, carnumber);
++			break;
++		}
++	}
+ }
+ 
+ 
+@@ -206,39 +371,45 @@
+ createcars(int nargs,
+            char ** args)
+ {
+-        int index, error;
++	/*
++	 * Avoid unused variable warnings.
++	 */
++	(void) nargs;
++	(void) args;
++	int index, error;
++	/*
++	 * Start NCARS approachintersection() threads.
++	 */
+ 
+-        /*
+-         * Avoid unused variable warnings.
+-         */
++	// initialize variables
++	intersectionMonitor.intersectionLock = lock_create("");
++	for (index = 0; index < 4; index++ ) {
++		intersectionMonitor.waitForSlot[index] = cv_create("");
++		intersectionMonitor.slots[index] = EMPTY;
++        intersectionMonitor.waitForAppro[index] = cv_create("");
++        intersectionMonitor.appro[index] = 0;
++	}
++	
++	for (index = 0; index < NCARS; index++) {
+ 
+-        (void) nargs;
+-        (void) args;
++			error = thread_fork("approachintersection thread",
++								NULL,
++								index,
++								approachintersection,
++								NULL
++								);
+ 
+-        /*
+-         * Start NCARS approachintersection() threads.
+-         */
++			/*
++			 * panic() on error.
++			 */
+ 
+-        for (index = 0; index < NCARS; index++) {
++			if (error) {
++					
++					panic("approachintersection: thread_fork failed: %s\n",
++						  strerror(error)
++						  );
++			}
++	}
+ 
+-                error = thread_fork("approachintersection thread",
+-                                    NULL,
+-                                    index,
+-                                    approachintersection,
+-                                    NULL
+-                                    );
+-
+-                /*
+-                 * panic() on error.
+-                 */
+-
+-                if (error) {
+-                        
+-                        panic("approachintersection: thread_fork failed: %s\n",
+-                              strerror(error)
+-                              );
+-                }
+-        }
+-
+-        return 0;
++	return 0;
+ }
+Index: submit/0/solution.txt
+===================================================================
+--- submit/0/solution.txt	(.../tags/asst1-start)	(revision 0)
++++ submit/0/solution.txt	(.../trunk)	(revision 10)
+@@ -0,0 +1,12 @@
++solution.txt
++
++1. catsem: how to avoid starvation.
++	Both cats and mice can wait on bowls and they will be given a bowl base on the order they wait. Once a mouse gets a bowl, it will wait until there is no cat eating. Once a cat gets a bowl, it also will wait until there is no mouse eating. Because if two cats or two mice get the bowls on the wait sequence, the two cats or the two mice wouldn't need to wait. So this guarantees there is no starvation.
++	
++2. stoplight: how to avoid starvation.
++	a) when a car approches, it will check if there is a car already approches. if yes, than wait for the direction it approches. if no, it will wait for the first region it approches.
++	b) when a car leave the waitForApproch, whitch means it enter the first rigion, it signals the next car to approch. a) and b) ensures that cars will not overtake each other.
++	c) before a car enters the intersection, it checks if entering will cause dead lock and if the region has a car. If one of this is yes, it waits again.
++	d) before a car leaves a region, it signals the cv on that region, so another car can enter this region. c) and d) ensures that no deadlock and car crash will happen.
++	e) Because there are only 20 cars, so no starvation will happen.
++	
+\ No newline at end of file
+
+Property changes on: submit/0/solution.txt
+___________________________________________________________________
+Added: svn:executable
+   + *
+
