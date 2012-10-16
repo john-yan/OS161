@@ -41,6 +41,7 @@
 #define SYS_stat         30
 #define SYS_lstat        31
 #define SYS_printchar    32
+#define SYS_readchar     33
 /*CALLEND*/
 
 

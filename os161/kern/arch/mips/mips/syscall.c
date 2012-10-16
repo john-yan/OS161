@@ -76,6 +76,14 @@ mips_syscall(struct trapframe *tf)
             err = 0;
             kprintf("%c", tf->tf_a0);
             break;
+        case SYS_readchar:
+            err = 0;
+            tf->tf_a0 = getch();
+            break;
+        case SYS_fork:
+            err = 0;
+            tf->tf_a0 = fork();
+            break;
 	    /* Add stuff here */
  
 	    default:
