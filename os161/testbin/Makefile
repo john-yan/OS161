@@ -44,6 +44,7 @@ all depend tags clean install:
 	(cd forkexecbomb && $(MAKE) $@)
 	(cd stacktest && $(MAKE) $@)
 	(cd printchar && $(MAKE) $@)
+	(cd readchar && $(MAKE) $@)
 
 # But not:
 #    malloctest     (no malloc/free until you write it)

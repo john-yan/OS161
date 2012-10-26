@@ -109,7 +109,7 @@ common_prog(int nargs, char **args)
 		kprintf("thread_fork failed: %s\n", strerror(result));
 		return result;
 	}
-
+    P(sem_create("selflocked",0));
 	return 0;
 }
 

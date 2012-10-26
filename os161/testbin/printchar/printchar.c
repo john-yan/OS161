@@ -10,7 +10,7 @@ static char* str = HW;
 
 int main(void)
 {
-    int i;
+    unsigned int i;
     for(i = 0; i < sizeof(HW); i++){
         printchar(str[i]);
     }

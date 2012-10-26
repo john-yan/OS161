@@ -78,11 +78,11 @@ mips_syscall(struct trapframe *tf)
             break;
         case SYS_readchar:
             err = 0;
-            tf->tf_a0 = getch();
+            retval = getch();
             break;
         case SYS_fork:
             err = 0;
-            tf->tf_a0 = fork();
+            //tf->tf_a0 = fork();
             break;
 	    /* Add stuff here */
  
