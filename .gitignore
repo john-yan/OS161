@@ -64,6 +64,7 @@ tags
 /os161/testbin/palin/palin
 /os161/testbin/parallelvm/parallelvm
 /os161/testbin/printchar/printchar
+/os161/testbin/readchar/readchar
 /os161/testbin/randcall/calls.c
 /os161/testbin/randcall/randcall
 /os161/testbin/rmdirtest/rmdirtest
