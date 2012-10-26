@@ -82,7 +82,7 @@ mips_syscall(struct trapframe *tf)
             break;
         case SYS_fork:
             err = 0;
-            //tf->tf_a0 = fork();
+            tf->tf_a0 = sys_fork();
             break;
 	    /* Add stuff here */
  

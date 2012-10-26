@@ -367,6 +367,12 @@ file      thread/scheduler.c
 file      thread/thread.c
 
 #
+# System Calls
+#
+
+file      syscalls/sys_fork.c
+
+#
 # Main/toplevel stuff
 #
 

@@ -7,7 +7,7 @@
 #include <kern/callno.h>
 #include <syscall.h>
 
-int fork()
+int sys_fork()
 {
     // on failure
     return -1;
