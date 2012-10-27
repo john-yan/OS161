@@ -23,7 +23,8 @@ __senderr(void *junk, const char *data, size_t len)
 {
 	(void)junk;  /* not needed or used */
 
-	write(STDERR_FILENO, data, len);
+	// write(STDERR_FILENO, data, len);
+    printf("%s" ,data);
 }
 
 /*

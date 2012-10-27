@@ -35,6 +35,33 @@ static struct array *zombies;
 /* Total number of outstanding threads. Does not count zombies[]. */
 static int numthreads;
 
+// new process id, increment by 1 for each new process
+static int newID = 0;
+
+// to create a new mipcb
+static inline struct MiPCB *
+MiPCBGetNew(struct thread* myTh){
+    struct MiPCB * newpcb = kmalloc(sizeof(struct MiPCB));
+    if(newpcb == NULL) return NULL;
+    newpcb->processID = newID++;
+    newpcb->parentThread = curthread;
+    newpcb->myThread = myTh;
+    newpcb->children = array_create();
+    newpcb->exitCode = 0;
+    
+    if (curthread)
+        array_add(curthread->t_miPCB->children, myTh);
+    
+    return newpcb;
+}
+
+// to destory a mipcb
+static inline void
+MiPCBDestroy(struct MiPCB* mipcb) {
+    array_destroy(mipcb->children);
+    kfree(mipcb);
+}
+
 /*
  * Create a thread. This is used both to create the first thread's 
  * thread structure and to create subsequent threads.
@@ -48,8 +75,16 @@ thread_create(const char *name)
 	if (thread==NULL) {
 		return NULL;
 	}
+    
+    thread->t_miPCB = MiPCBGetNew(thread);
+    if (thread->t_miPCB == NULL) {
+    	kfree(thread);
+		return NULL;
+    }
+    
 	thread->t_name = kstrdup(name);
 	if (thread->t_name==NULL) {
+        MiPCBDestroy(thread->t_miPCB);
 		kfree(thread);
 		return NULL;
 	}
@@ -89,6 +124,7 @@ thread_destroy(struct thread *thread)
 		kfree(thread->t_stack);
 	}
 
+    MiPCBDestroy(thread->t_miPCB);
 	kfree(thread->t_name);
 	kfree(thread);
 }
@@ -100,20 +136,14 @@ thread_destroy(struct thread *thread)
  */
 static
 void
-exorcise(void)
+exorcise(struct thread* z)
 {
-	int i, result;
-
 	assert(curspl>0);
-	
-	for (i=0; i<array_getnum(zombies); i++) {
-		struct thread *z = array_getguy(zombies, i);
-		assert(z!=curthread);
-		thread_destroy(z);
-	}
-	result = array_setsize(zombies, 0);
+	thread_destroy(z);
+
+	// result = array_setsize(zombies, 0);
 	/* Shrinking the array; not supposed to be able to fail. */
-	assert(result==0);
+	// assert(result==0);
 }
 
 /*
@@ -124,9 +154,9 @@ static
 void
 thread_killall(void)
 {
-	int i, result;
+	// int i, result;
 
-	assert(curspl>0);
+	// assert(curspl>0);
 
 	/*
 	 * Move all sleepers to the zombie list, to be sure they don't
@@ -412,7 +442,7 @@ mi_switch(threadstate_t nextstate)
 	 * exorcise is skippable; as_activate is done in mi_threadstart.
 	 */
 
-	exorcise();
+	// exorcise();
 
 	if (curthread->t_vmspace) {
 		as_activate(curthread->t_vmspace);

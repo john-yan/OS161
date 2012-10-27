@@ -371,6 +371,7 @@ file      thread/thread.c
 #
 
 file      syscalls/sys_fork.c
+file      syscalls/sys_getpid.c
 
 #
 # Main/toplevel stuff

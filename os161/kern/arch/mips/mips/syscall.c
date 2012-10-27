@@ -82,7 +82,12 @@ mips_syscall(struct trapframe *tf)
             break;
         case SYS_fork:
             err = 0;
-            tf->tf_a0 = sys_fork();
+            retval = sys_fork(tf);
+            err = retval == -1? -1 : 0;
+            break;
+        case SYS_getpid:
+            err = 0;
+            retval = sys_getpid();
             break;
 	    /* Add stuff here */
  
@@ -119,15 +124,3 @@ mips_syscall(struct trapframe *tf)
 	assert(curspl==0);
 }
 
-void
-md_forkentry(struct trapframe *tf)
-{
-	/*
-	 * This function is provided as a reminder. You need to write
-	 * both it and the code that calls it.
-	 *
-	 * Thus, you can trash it and do things another way if you prefer.
-	 */
-
-	(void)tf;
-}

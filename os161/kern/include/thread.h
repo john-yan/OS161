@@ -7,9 +7,10 @@
 
 /* Get machine-dependent stuff */
 #include <machine/pcb.h>
+#include <mipcb.h>
 #include <queue.h>
 
-
+extern struct thread *curthread;
 struct addrspace;
 
 struct thread {
@@ -32,6 +33,7 @@ struct thread {
 	 * code.
 	 */
 	struct addrspace *t_vmspace;
+    struct MiPCB *t_miPCB;
 
 	/*
 	 * This is public because it isn't part of the thread system,
@@ -59,7 +61,8 @@ void thread_shutdown(void);
  * general the child thread might exit at any time.) Returns an error
  * code.
  */
-int thread_fork(const char *name, 
+int
+thread_fork(const char *name, 
 		void *data1, unsigned long data2, 
 		void (*func)(void *, unsigned long),
 		struct thread **ret);
