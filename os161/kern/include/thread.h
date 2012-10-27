@@ -42,6 +42,9 @@ struct thread {
 	struct vnode *t_cwd;
 };
 
+void MiPCBDestroy(struct MiPCB* mipcb);
+struct MiPCB * MiPCBGetNew(struct thread* myTh);
+
 /* Call once during startup to allocate data structures. */
 struct thread *thread_bootstrap(void);
 

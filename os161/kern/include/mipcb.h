@@ -3,9 +3,11 @@
 
 struct MiPCB {
     int processID;
-    struct thread *parentThread;
+    struct MiPCB *parentPCB;
     struct thread *myThread;
     struct array *children;
+    struct semaphore* waitOnExit;
+    int isExit;
     int exitCode;
     
     // struct queue* openFiles;

@@ -45,7 +45,7 @@ sem_destroy(struct semaphore *sem)
 	assert(sem != NULL);
 
 	spl = splhigh();
-	assert(thread_hassleepers(sem->waitqueue)==0);
+	assert(!thread_hassleepers(sem->waitqueue));
 	splx(spl);
 
 	/*

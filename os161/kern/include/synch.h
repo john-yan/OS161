@@ -25,6 +25,8 @@ struct semaphore {
 };
 
 struct semaphore *sem_create(const char *name, int initial_count);
+#define Down(x) P(x)
+#define Up(x) V(x)
 void              P(struct semaphore *);
 void              V(struct semaphore *);
 void              sem_destroy(struct semaphore *);

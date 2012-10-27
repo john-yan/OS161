@@ -53,7 +53,7 @@ mips_syscall(struct trapframe *tf)
 	int err;
 
 	assert(curspl==0);
-
+    splhigh();
 	callno = tf->tf_v0;
 
 	/*
@@ -80,6 +80,10 @@ mips_syscall(struct trapframe *tf)
             err = 0;
             retval = getch();
             break;
+        case SYS__exit:
+            err = 0;
+            sys__exit(tf->tf_a0);
+            break;
         case SYS_fork:
             err = 0;
             retval = sys_fork(tf);
@@ -88,6 +92,14 @@ mips_syscall(struct trapframe *tf)
         case SYS_getpid:
             err = 0;
             retval = sys_getpid();
+            err = retval == -1? -1 : 0;
+            break;
+        case SYS_waitpid:
+            err = 0;
+            int pid = tf->tf_a0;
+            int *status = (int*)tf->tf_a1;
+            int option = tf->tf_a2;
+            retval = sys_waitpid(pid, status, option);
             break;
 	    /* Add stuff here */
  
@@ -121,6 +133,7 @@ mips_syscall(struct trapframe *tf)
 	tf->tf_epc += 4;
 
 	/* Make sure the syscall code didn't forget to lower spl */
+    spl0();
 	assert(curspl==0);
 }
 

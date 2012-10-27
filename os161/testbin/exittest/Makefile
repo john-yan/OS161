@@ -1,0 +1,9 @@
+# Makefile for printchar
+
+SRCS=exittest.c
+PROG=exittest
+BINDIR=/testbin
+
+include ../../defs.mk
+include ../../mk/prog.mk
+

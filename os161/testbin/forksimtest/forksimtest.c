@@ -5,17 +5,15 @@
 #include <unistd.h>
 #include <stdio.h>
 
-static int buf;
-
 int main(void)
 {
     int pid = fork();
     if(!pid) {
-        printf("hello from child.\n");
+        printf("hello from child %d.\n", getpid());
         return 0;
     }
     
-    printf("hello from parent.\n");
+    printf("hello from parent %d.\n", getpid());
     return 0;
 }
 

@@ -14,6 +14,7 @@
 #include <vnode.h>
 #include "opt-synchprobs.h"
 #include <queue.h>
+#include <synch.h>
 
 /* States a thread can be in. */
 typedef enum {
@@ -39,25 +40,46 @@ static int numthreads;
 static int newID = 0;
 
 // to create a new mipcb
-static inline struct MiPCB *
+struct MiPCB *
 MiPCBGetNew(struct thread* myTh){
+    int ret = 0;
+    
     struct MiPCB * newpcb = kmalloc(sizeof(struct MiPCB));
     if(newpcb == NULL) return NULL;
     newpcb->processID = newID++;
-    newpcb->parentThread = curthread;
+    newpcb->parentPCB = curthread ? curthread->t_miPCB : NULL;
     newpcb->myThread = myTh;
     newpcb->children = array_create();
+    if (newpcb->children == NULL) {
+        kfree(newpcb);
+        return NULL;
+    }
+    newpcb->waitOnExit = sem_create("",0);
+    if (newpcb->waitOnExit == NULL) {
+        array_destroy(newpcb->children);
+        kfree(newpcb);
+        return NULL;
+    }
+    newpcb->isExit = 0;
     newpcb->exitCode = 0;
     
     if (curthread)
-        array_add(curthread->t_miPCB->children, myTh);
+        ret = array_add(curthread->t_miPCB->children, newpcb);
     
+    if (ret) {
+        sem_destroy(newpcb->waitOnExit);
+        array_destroy(newpcb->children);
+        kfree(newpcb);
+        return NULL;
+    }
     return newpcb;
 }
 
 // to destory a mipcb
-static inline void
+void
 MiPCBDestroy(struct MiPCB* mipcb) {
+    kprintf("destory process with id = %d\n", mipcb->processID);
+    sem_destroy(mipcb->waitOnExit);
     array_destroy(mipcb->children);
     kfree(mipcb);
 }
@@ -93,7 +115,7 @@ thread_create(const char *name)
 	
 	thread->t_vmspace = NULL;
 
-	thread->t_cwd = NULL;
+	thread->t_cwd = NULL; 
 	
 	// If you add things to the thread structure, be sure to initialize
 	// them here.
@@ -123,8 +145,7 @@ thread_destroy(struct thread *thread)
 	if (thread->t_stack) {
 		kfree(thread->t_stack);
 	}
-
-    MiPCBDestroy(thread->t_miPCB);
+    
 	kfree(thread->t_name);
 	kfree(thread);
 }
@@ -136,14 +157,20 @@ thread_destroy(struct thread *thread)
  */
 static
 void
-exorcise(struct thread* z)
+exorcise(void)
 {
-	assert(curspl>0);
-	thread_destroy(z);
+    int i, result;
 
-	// result = array_setsize(zombies, 0);
-	/* Shrinking the array; not supposed to be able to fail. */
-	// assert(result==0);
+    assert(curspl>0);
+
+    for (i=0; i<array_getnum(zombies); i++) {
+        struct thread *z = array_getguy(zombies, i);
+        assert(z!=curthread);
+        thread_destroy(z);
+    }
+    result = array_setsize(zombies, 0);
+    /* Shrinking the array; not supposed to be able to fail. */
+    assert(result==0);
 }
 
 /*
@@ -442,7 +469,7 @@ mi_switch(threadstate_t nextstate)
 	 * exorcise is skippable; as_activate is done in mi_threadstart.
 	 */
 
-	// exorcise();
+	exorcise();
 
 	if (curthread->t_vmspace) {
 		as_activate(curthread->t_vmspace);
@@ -489,7 +516,32 @@ thread_exit(void)
 		VOP_DECREF(curthread->t_cwd);
 		curthread->t_cwd = NULL;
 	}
-
+    
+    // signal the child
+    int totalChildren = array_getnum(curthread->t_miPCB->children);
+    int i;
+    for (i = 0; i < totalChildren; i++) {
+        struct MiPCB *cmipcb = array_getguy(curthread->t_miPCB->children, i);
+        if (cmipcb->isExit) {
+            // if the child already exit, destory the mipcb
+            MiPCBDestroy(cmipcb);
+        } else {
+            cmipcb->parentPCB = NULL;
+        }
+    }
+    
+    // check if parent exit
+    if (curthread->t_miPCB->parentPCB == NULL) {
+        // if parent exit, simply destory the miPCB
+        MiPCBDestroy(curthread->t_miPCB);
+    } else {
+        // signal the sem
+        Up(curthread->t_miPCB->waitOnExit);
+        curthread->t_miPCB->myThread = NULL;
+        curthread->t_miPCB->isExit = 1;
+    }
+    
+    curthread->t_miPCB = NULL;
 	assert(numthreads>0);
 	numthreads--;
 	mi_switch(S_ZOMB);
@@ -550,7 +602,7 @@ thread_sleep(struct queue* waitqueue)
 void
 thread_wakeup(struct queue *waitqueue)
 {
-	int i, result, spl;
+	int result, spl;
 	
     assert(waitqueue != NULL);
 	// meant to be called with interrupts off
@@ -626,12 +678,11 @@ thread_wakeupAll(struct queue *waitqueue)
 int
 thread_hassleepers(struct queue *waitqueue)
 {
-	int i;
 	
 	// meant to be called with interrupts off
 	assert(curspl>0);
 	
-    return q_empty(waitqueue);
+    return !q_empty(waitqueue);
 }
 
 /*

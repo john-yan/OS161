@@ -46,6 +46,8 @@ all depend tags clean install:
 	(cd printchar && $(MAKE) $@)
 	(cd readchar && $(MAKE) $@)
 	(cd forksimtest && $(MAKE) $@)
+	(cd exittest && $(MAKE) $@)
+	(cd waitpidtest && $(MAKE) $@)
 
 # But not:
 #    malloctest     (no malloc/free until you write it)
