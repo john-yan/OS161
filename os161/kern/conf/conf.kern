@@ -374,6 +374,7 @@ file      syscalls/sys_fork.c
 file      syscalls/sys_getpid.c
 file      syscalls/sys__exit.c
 file      syscalls/sys_waitpid.c
+file      syscalls/sys_execv.c
 
 #
 # Main/toplevel stuff

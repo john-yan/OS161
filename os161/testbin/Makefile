@@ -48,7 +48,8 @@ all depend tags clean install:
 	(cd forksimtest && $(MAKE) $@)
 	(cd exittest && $(MAKE) $@)
 	(cd waitpidtest && $(MAKE) $@)
-
+	(cd execvtest && $(MAKE) $@)
+	
 # But not:
 #    malloctest     (no malloc/free until you write it)
 #    userthreads    (no support in kernel API in base system)

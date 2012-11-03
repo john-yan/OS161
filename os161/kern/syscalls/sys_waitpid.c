@@ -60,7 +60,8 @@ int sys_waitpid(int pid, int* status, int options)
     assert(cmipcb->isExit == 1);
     
     int exitCode = cmipcb->exitCode;
-    uiomove(&exitCode, 4, &u);
+    // uiomove(&exitCode, 4, &u);
+    copyout(&exitCode, status, 4);
     
     MiPCBDestroy(cmipcb);
     array_remove(curthread->t_miPCB->children, i);

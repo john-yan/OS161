@@ -29,6 +29,7 @@ runprogram(char *progname)
 	int result;
 
 	/* Open the file. */
+    kprintf("open: %s\n", progname);
 	result = vfs_open(progname, O_RDONLY, &v);
 	if (result) {
 		return result;
