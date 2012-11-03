@@ -53,7 +53,7 @@ mips_syscall(struct trapframe *tf)
 	int err;
 
 	assert(curspl==0);
-    splhigh();
+    // splhigh();
 	callno = tf->tf_v0;
 
 	/*
@@ -133,7 +133,7 @@ mips_syscall(struct trapframe *tf)
 	tf->tf_epc += 4;
 
 	/* Make sure the syscall code didn't forget to lower spl */
-    spl0();
+    // spl0();
 	assert(curspl==0);
 }
 

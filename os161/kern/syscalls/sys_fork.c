@@ -15,34 +15,43 @@ void md_forkentry(struct trapframe *tf, unsigned long unused);
 int sys_fork(struct trapframe *tf)
 {
     int spl = splhigh();
+    int ret;
     
     // copy the trapframe
     struct trapframe *newtf = kmalloc(sizeof(struct trapframe));
     if (newtf == NULL) {
+        splx(spl);
         return -1;
     }
     memmove(newtf, tf, sizeof(struct trapframe));
     
-    // create a new thread
-    struct thread *newth;
-    int ret = thread_fork("" /* thread name */,
-			newtf /* thread arg */, 1 /* thread arg */,
-			md_forkentry, &newth);
-    if (ret) {
-        kfree(newtf);
-        return -1;
-    }
-    
+    struct addrspace *t_vmspace;
     /* Copy the address space. */
-	ret = as_copy(curthread->t_vmspace, &newth->t_vmspace);
+	ret = as_copy(curthread->t_vmspace, &t_vmspace);
 	if (ret) {
+        kfree(newtf);
+        splx(spl);
 		return -1;
 	}
     
+    // create a new thread
+    struct thread *newth;
+    ret = thread_fork("" /* thread name */,
+			newtf /* thread arg */, 1 /* thread arg */,
+			md_forkentry, &newth);
+    if (ret) {
+        as_destroy(t_vmspace);
+        kfree(newtf);
+        splx(spl);
+        return -1;
+    }
+    newth->t_vmspace = t_vmspace;
+    
+    int newid = newth->t_miPCB->processID;
     splx(spl);
     
     // on success
-    return newth->t_miPCB->processID;
+    return newid;
 }
 
 static
@@ -51,6 +60,9 @@ void md_forkentry(struct trapframe *tf, unsigned long unused)
     // disable interrupt
     splhigh();
     
+    if (curthread->t_vmspace == NULL) {
+        thread_exit();
+    }
     // copy the trapframe to our own stack and free it
     struct trapframe mytf;
     memmove(&mytf, tf, sizeof(mytf));

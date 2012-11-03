@@ -78,7 +78,7 @@ MiPCBGetNew(struct thread* myTh){
 // to destory a mipcb
 void
 MiPCBDestroy(struct MiPCB* mipcb) {
-    kprintf("destory process with id = %d\n", mipcb->processID);
+    // kprintf("destory process with id = %d\n", mipcb->processID);
     sem_destroy(mipcb->waitOnExit);
     array_destroy(mipcb->children);
     kfree(mipcb);

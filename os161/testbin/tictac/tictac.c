@@ -186,7 +186,7 @@ do_move(int player)
 	int x, y;
 	bool first;
 	char answer[MAXSTRING];
-	char cx;
+	// char cx;
 
 	first = TRUE;
 	printf("Player %d (%c), your move\n", player, 
@@ -196,8 +196,8 @@ do_move(int player)
 		printf("Which row [0-%d]: ", DIM-1);
 		if (read_string(answer, MAXSTRING) < 0)
 			return(FALSE);
-		cx = answer[0];
-		x = cx - '0';
+		sscanf(answer, "%d", &x);
+		// x = cx - '0';
 		if (x < 0 || x >= DIM) {
 			printf("Invalid row; must be >= 0 and < %d\n", DIM-1);
 			continue;
@@ -205,8 +205,9 @@ do_move(int player)
 		printf("Which column [0-%d]: ", DIM-1);
 		if (read_string(answer, MAXSTRING) < 0)
 			return(FALSE);
-		cx = answer[0];
-		y = cx - '0';
+		// cx = answer[0];
+        sscanf(answer, "%d", &y);
+		// y = cx - '0';
 		if (y < 0 || y >= DIM) {
 			printf("Invalid column; must be >= 0 and < %d\n",
 				DIM-1);

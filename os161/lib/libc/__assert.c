@@ -16,6 +16,6 @@ __bad_assert(const char *file, int line, const char *expr)
 	snprintf(buf, sizeof(buf), "Assertion failed: %s (%s line %d)\n",
 		 expr, file, line);
 
-	write(STDERR_FILENO, buf, strlen(buf));
+	printf("%s", buf); // write(STDERR_FILENO, buf, strlen(buf));
 	abort();
 }

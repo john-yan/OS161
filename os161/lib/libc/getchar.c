@@ -12,11 +12,11 @@ getchar(void)
 	char ch;
 	int len;
 
-	len = read(STDIN_FILENO, &ch, 1);
-	if (len<=0) {
-		/* end of file or error */
-		return EOF;
-	}
+	ch = readchar(); // read(STDIN_FILENO, &ch, 1);
+	// if (len<=0) {
+		// /* end of file or error */
+		// return EOF;
+	// }
 
 	/*
 	 * Cast through unsigned char, to prevent sign extension. This

@@ -82,6 +82,7 @@ tags
 /os161/testbin/triplesort/triple.c
 /os161/testbin/triplesort/triple.h
 /os161/testbin/triplesort/triplesort
+/os161/testbin/waitpidtest/waitpidtest
 #==============================================================================#
 # Directories to ignore (do not add trailing '/'s, they skip symlinks).
 #==============================================================================#

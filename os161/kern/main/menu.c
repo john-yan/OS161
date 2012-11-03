@@ -96,7 +96,10 @@ int
 common_prog(int nargs, char **args)
 {
 	int result;
-
+    struct thread *newth;
+    struct semaphore *sem;
+    int spl = splhigh();
+    
 #if OPT_SYNCHPROBS
 	kprintf("Warning: this probably won't work with a "
 		"synchronization-problems kernel.\n");
@@ -104,12 +107,16 @@ common_prog(int nargs, char **args)
 
 	result = thread_fork(args[0] /* thread name */,
 			args /* thread arg */, nargs /* thread arg */,
-			cmd_progthread, NULL);
+			cmd_progthread, &newth);
 	if (result) {
 		kprintf("thread_fork failed: %s\n", strerror(result));
 		return result;
 	}
-    P(sem_create("selflocked",0));
+    sem = newth->t_miPCB->waitOnExit;
+    
+    splx(spl);
+    
+    P(sem);
 	return 0;
 }
 
