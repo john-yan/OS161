@@ -12,7 +12,7 @@
 static
 void md_forkentry(struct trapframe *tf, unsigned long unused);
 
-int sys_fork(struct trapframe *tf)
+int sys_fork(struct trapframe *tf, int* err)
 {
     int spl = splhigh();
     int ret;
@@ -20,6 +20,7 @@ int sys_fork(struct trapframe *tf)
     // copy the trapframe
     struct trapframe *newtf = kmalloc(sizeof(struct trapframe));
     if (newtf == NULL) {
+        *err = ENOMEM;
         splx(spl);
         return -1;
     }
@@ -31,6 +32,7 @@ int sys_fork(struct trapframe *tf)
 	if (ret) {
         kfree(newtf);
         splx(spl);
+        *err = ENOMEM;
 		return -1;
 	}
     
@@ -43,6 +45,7 @@ int sys_fork(struct trapframe *tf)
         as_destroy(t_vmspace);
         kfree(newtf);
         splx(spl);
+        *err = ENOMEM;
         return -1;
     }
     newth->t_vmspace = t_vmspace;

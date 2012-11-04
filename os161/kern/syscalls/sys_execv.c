@@ -14,7 +14,7 @@
 // #define MAXARGS 20
 #define MAXBYTES 50
 
-int sys_execv(struct trapframe *tf)
+int sys_execv(struct trapframe *tf, int* err)
 {
     char argv[MAXBYTES][20];
     char prog[MAXBYTES];
