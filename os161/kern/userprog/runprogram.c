@@ -22,14 +22,14 @@
  * Calls vfs_open on progname and thus may destroy it.
  */
 int
-runprogram(char *progname)
+runprogram(char *progname, int argc, char* argv[])
 {
 	struct vnode *v;
 	vaddr_t entrypoint, stackptr;
 	int result;
 
 	/* Open the file. */
-    kprintf("open: %s\n", progname);
+    // kprintf("open: %s\n", progname);
 	result = vfs_open(progname, O_RDONLY, &v);
 	if (result) {
 		return result;
@@ -66,8 +66,42 @@ runprogram(char *progname)
 		return result;
 	}
 
+    int total = 0;
+    int i;
+    for (i = 0; i < argc; i++) {
+        total += strlen(argv[i]) + 1;
+    }
+    
+    char *uargv[argc + 1];
+    uargv[argc] = NULL;
+    stackptr -= (total/4 + 1) * 4;
+    userptr_t curptr = stackptr;
+    size_t size;
+    int ret;
+#define MAXBYTES 50
+    
+    // kprintf("stackptr = %x, total = %d\n", stackptr, total);
+    for (i = 0; i < argc; i++) {
+        uargv[i] = curptr;
+        if ((ret = copyoutstr(argv[i], curptr, MAXBYTES, &size)) != 0) {
+            kprintf("copyoutstr failed.\n");
+            return ret;
+        }
+        curptr += size;
+    }
+    
+    stackptr -= (argc + 1)<<2;
+    curptr = stackptr;
+    
+    if ((ret = copyout(uargv, curptr, (argc + 1)<<2)) != 0) {
+        kprintf("copyout failed.\n");
+        return ret;
+    }
+    
+    // kprintf("argc = %d\n", argc);
+    
 	/* Warp to user mode. */
-	md_usermode(0 /*argc*/, NULL /*userspace addr of argv*/,
+	md_usermode(argc /*argc*/, curptr /*userspace addr of argv*/,
 		    stackptr, entrypoint);
 	
 	/* md_usermode does not return */

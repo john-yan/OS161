@@ -7,6 +7,7 @@
 #include <kern/unistd.h>
 #include <kern/limits.h>
 #include <lib.h>
+#include <machine/spl.h>
 #include <clock.h>
 #include <thread.h>
 #include <syscall.h>
@@ -61,7 +62,7 @@ cmd_progthread(void *ptr, unsigned long nargs)
 	assert(nargs >= 1);
 
 	if (nargs > 2) {
-		kprintf("Warning: argument passing from menu not supported\n");
+		// kprintf("Warning: argument passing from menu not supported\n");
 	}
 
 	/* Hope we fit. */
@@ -69,7 +70,7 @@ cmd_progthread(void *ptr, unsigned long nargs)
 
 	strcpy(progname, args[0]);
 
-	result = runprogram(progname);
+	result = runprogram(progname, nargs, args);
 	if (result) {
 		kprintf("Running program %s failed: %s\n", args[0],
 			strerror(result));

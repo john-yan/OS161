@@ -26,7 +26,7 @@ int sys_execv(struct trapframe *tf)
     struct vnode *v;
 	vaddr_t entrypoint, stackptr;
     struct addrspace* oldvm = curthread->t_vmspace;
-    int spl = splhigh();
+    
     
     ret = copyinstr(_prog, prog, MAXBYTES, &size);
     if (ret) {
@@ -55,10 +55,10 @@ int sys_execv(struct trapframe *tf)
     /* Open the file. */
 	if ((ret = vfs_open(prog, O_RDONLY, &v)) != 0) {
         kprintf("can't open file.");
-        splx(spl);
 		return ret;
 	}
     
+    int spl = splhigh();
     /* Create a new address space. */
 	curthread->t_vmspace = as_create();
 	if (curthread->t_vmspace==NULL) {
