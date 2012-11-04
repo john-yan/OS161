@@ -123,10 +123,10 @@ int sys_execv(struct trapframe *tf, int* err)
         return ret;
     }
     
-    kprintf("stackptr = %x\n", stackptr);
-    for (i = 0; i < nargs; i++) {
-        kprintf("argv[%d]: %x\n", i, uargv[i]);
-    }
+    // kprintf("stackptr = %x\n", stackptr);
+    // for (i = 0; i < nargs; i++) {
+        // kprintf("argv[%d]: %x\n", i, uargv[i]);
+    // }
     
     as_destroy(oldvm);
     
