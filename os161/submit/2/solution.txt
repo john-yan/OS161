@@ -1,0 +1,49 @@
+solution.txt
+
+Data structures considerations:
+    Because after the exit of a thread, the context of the thread can be free after a context switch but however the return value of the thread may be preserved, because the parent of the process associating with this thread may call waitpid afterwards. So we design to create a new struct call MiPCB with will contain all the information of the process associating with the thread, for example, the parent of the processs, the status of the process, the status of the parent, the exit code of the process and the children of the process. And I add a pointer in the thread structure to point to the MiPCB structure. When a thread exits, the thread structure will be deallocated but MiPCB may not be deallocated. There are 3 situations for the MiPCB respect to the current process:
+    
+        1. The parent of the process exits before this process, the MiPCB will be immediately deallocated.
+        
+        2. The parent of the process currently is waiting in the waitpid system call. In this case, parent will be waked up immediately and when the parent gets to run, the MiPCB is deallocated in the context of the thread of parent process.
+        
+        3. In situations other than the above two, the MiPCB is preserved.
+        
+    There are also 3 situations for the MiPCB respect to the parent of the process:
+    
+        1. If the child is not exit when the parent calls waitpid, the parent will be block unitil the child exits. The parent will be wakeup and get the return value of the child, deallocate the MiPCB and return from the waitpid.
+        
+        2. If the child is alread exit, the parent will get the return value of the child, deallocate the MiPCB and return immediately from the waitpid.
+        
+        3. If the parent wants to exit, it will check for all its children to see if they are already exit. If the child is exit, the parent will deallocate the MiPCB of this child.
+        
+Problem for trapframe passing in the fork system call:
+    Because the new thread should be run the next instruction just after the fork call, so it need to have the trapframe struct of the parent in order to call the mips_usermode. We can't simply pass a pointer to the trapframe of the parent, because when the new thread gets to run, the parent may already ruturn from the fork and the trapframe of the parent is destroy. So we call kmalloc and copy the trapframe of the parent and pass it to the child. The child will copy the trapframe in the heap to its stack and deallocated the trapframe in the heap.
+    
+Problem for execv argv passing:
+    Because we will use a new vmspace to run the program and destroy the old vmspace, we can't just use the argv passed from execv. We first copy the content of argv from the old vmspace to the kernel space. At the same time, we have to make sure argv is NULL terminated and each string is also NULL terminated. Then we creates the new vmspace and load the elf file to the new vmspace, and copy argv from the kernel space to the top of the stack of new vmspace. Because parameter pass is done by register, we set the value of the tf_a0 to the number of argv, and the tf_a1 to argv. Also, because the top of the stack is changed, we need to update the tf_sp corrently. Finally, we can deallocated the old vmspace and call md_usermode to switch to the usermode. We can't deallocated the old vmspace before all the work memtioned is done, because if one of the job is failed, we should be able to return to the old program associating with the old vmspace.
+    
+Problem for kernel crash for dereference NULL pointer in user mode:
+    We discover that dereference NULL pointer in the user mode will crash the kernel by the page fault. In this case, we modify the kill_curthread to call the thread_exit instead of calling panic to crash the kernel.
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
