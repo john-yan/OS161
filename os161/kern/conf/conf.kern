@@ -400,6 +400,7 @@ file      userprog/uio.c
 #
 
 optofffile dumbvm   vm/addrspace.c
+file        vm/coremap.c
 
 #
 # Network

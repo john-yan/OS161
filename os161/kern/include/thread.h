@@ -20,7 +20,7 @@ struct thread {
 	
 	struct pcb t_pcb;
 	char *t_name;
-	struct queue* t_sleepaddr;
+	// struct queue* t_sleepaddr;
 	char *t_stack;
 	
 	/**********************************************************/

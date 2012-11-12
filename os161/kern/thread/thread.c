@@ -110,7 +110,7 @@ thread_create(const char *name)
 		kfree(thread);
 		return NULL;
 	}
-	thread->t_sleepaddr = NULL;
+	// thread->t_sleepaddr = NULL;
 	thread->t_stack = NULL;
 	
 	thread->t_vmspace = NULL;
@@ -141,7 +141,8 @@ thread_destroy(struct thread *thread)
 	// These things are cleaned up in thread_exit.
 	assert(thread->t_vmspace==NULL);
 	assert(thread->t_cwd==NULL);
-	
+	assert(thread->t_miPCB == NULL);
+    
 	if (thread->t_stack) {
 		kfree(thread->t_stack);
 	}
@@ -230,10 +231,10 @@ thread_bootstrap(void)
 	struct thread *me;
 
 	/* Create the data structures we need. */
-	sleepers = array_create();
-	if (sleepers==NULL) {
-		panic("Cannot create sleepers array\n");
-	}
+	// sleepers = array_create();
+	// if (sleepers==NULL) {
+		// panic("Cannot create sleepers array\n");
+	// }
 
 	zombies = array_create();
 	if (zombies==NULL) {
@@ -273,10 +274,10 @@ thread_bootstrap(void)
 void
 thread_shutdown(void)
 {
-	array_destroy(sleepers);
-	sleepers = NULL;
-	array_destroy(zombies);
-	zombies = NULL;
+	// array_destroy(sleepers);
+	// sleepers = NULL;
+	// array_destroy(zombies);
+	// zombies = NULL;
 	// Don't do this - it frees our stack and we blow up
 	//thread_destroy(curthread);
 }
@@ -331,10 +332,10 @@ thread_fork(const char *name,
 	 * Make sure our data structures have enough space, so we won't
 	 * run out later at an inconvenient time.
 	 */
-	result = array_preallocate(sleepers, numthreads+1);
-	if (result) {
-		goto fail;
-	}
+	// result = array_preallocate(sleepers, numthreads+1);
+	// if (result) {
+		// goto fail;
+	// }
 	result = array_preallocate(zombies, numthreads+1);
 	if (result) {
 		goto fail;
@@ -587,10 +588,10 @@ thread_sleep(struct queue* waitqueue)
     int spl;
     spl = splhigh();
 
-	curthread->t_sleepaddr = waitqueue;
+	// curthread->t_sleepaddr = waitqueue;
     q_addtail(waitqueue, curthread);
 	mi_switch(S_SLEEP);
-	curthread->t_sleepaddr = NULL;
+	// curthread->t_sleepaddr = NULL;
 
     // enable int
     splx(spl);

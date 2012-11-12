@@ -16,6 +16,7 @@
 #include <vm.h>
 #include <syscall.h>
 #include <version.h>
+#include <coremap.h>
 
 /*
  * These two pieces of data are maintained by the makefiles and build system.
@@ -71,6 +72,7 @@ boot(void)
 	kprintf("\n");
 
 	ram_bootstrap();
+    CoreMapBootsTrap();
 	scheduler_bootstrap();
 	thread_bootstrap();
 	vfs_bootstrap();

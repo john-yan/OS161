@@ -131,7 +131,7 @@ print_run_queue(void)
 	
 	while (i!=q_getend(runqueue)) {
 		struct thread *t = q_getguy(runqueue, i);
-		kprintf("  %2d: %s %p\n", k, t->t_name, t->t_sleepaddr);
+		kprintf("  %2d: %s\n", k, t->t_name);
 		i=(i+1)%q_getsize(runqueue);
 		k++;
 	}
