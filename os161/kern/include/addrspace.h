@@ -12,19 +12,42 @@ struct vnode;
  *
  * You write this.
  */
+typedef struct {
+    paddr_t    frameAddr: 20;
+    u_int32_t writable: 1;
+    u_int32_t valid: 1;
+    u_int32_t global: 1; // ignore pid bits if set
+    u_int32_t unused: 8;
+} PageTableEntry;
+
+typedef struct {
+    PageTableEntry pte[1024];
+} PageTableL2;
+
+typedef struct {
+    PageTableL2*    pageTableL2[512];
+} PageTableL1;
+
+typedef struct {
+    vaddr_t regionBase: 20; // virtual frame address 4k alignment
+    u_int32_t regionLength: 12; // size of the region
+    u_int32_t regionType;
+} Region;
+
+#define REGION_TEXT 1
+#define REGION_DATA 2
+#define REGION_STACK 3
+#define REGION_HEAP 4
 
 struct addrspace {
-//#if OPT_DUMBVM
 	vaddr_t as_vbase1;
-	paddr_t as_pbase1;
+	// paddr_t as_pbase1;
 	size_t as_npages1;
 	vaddr_t as_vbase2;
-	paddr_t as_pbase2;
+	// paddr_t as_pbase2;
 	size_t as_npages2;
-	paddr_t as_stackpbase;
-//#else
-	/* Put stuff here for your VM system */
-//#endif
+	paddr_t as_stackvbase;
+    PageTableL1 pageTable;
 };
 
 /*

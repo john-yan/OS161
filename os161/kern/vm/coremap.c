@@ -130,7 +130,34 @@ void FreeNPages(u_int32_t paddr)
     assert(pe + pe->nContinousPages <= LASTENTRY);
     for (i = 0; i < nPages; i++) {
         assert(pe[i].isAllocated == 1);
-        pe->isAllocated = 0;
+        pe[i].isAllocated = 0;
     }
     kprintf("free %d pages(%d).\n", nPages, pages -= nPages);
 }
+
+void CoreMapReport()
+{
+    unsigned i = 0;
+    unsigned numOfFreePages = 0;
+    unsigned numOfAllocPages = 0;
+    PageEntry* pe = FIRSTENTRY;
+    for (i = 0; i < coremap.totalNumberOfPages; i++) {
+        if (pe[i].isAllocated == 1)
+            numOfAllocPages++;
+        else
+            numOfFreePages++;
+    }
+    kprintf("number of free pages = %d\n", numOfFreePages);
+    kprintf("number of allocated pages = %d\n", numOfAllocPages);
+}
+
+
+
+
+
+
+
+
+
+
+

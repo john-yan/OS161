@@ -45,12 +45,12 @@ getppages(unsigned long npages)
 	paddr_t addr;
 
 	spl = splhigh();
-
+    
 	addr = GetNFreePage(npages);
     // kprintf("getpages.\n");
 	if (addr) 
         AllocateNPages(addr, 1, npages);
-    
+    CoreMapReport();
 	splx(spl);
 	return addr;
 }
@@ -70,25 +70,45 @@ alloc_kpages(int npages)
 void 
 free_kpages(vaddr_t addr)
 {
+    int spl = splhigh();
     FreeNPages(KVADDR_TO_PADDR(addr));
+    CoreMapReport();
+	splx(spl);
+}
 
-	(void)addr;
+int GetPhysicalFrame(PageTableL1 *ptl1, vaddr_t vaddr, paddr_t *paddr)
+{
+    assert((vaddr & 0xfffff000) == vaddr);
+    assert(paddr != NULL);
+    
+    vaddr = (unsigned)vaddr >> 12;
+    u_int32_t pageTableL1Index = vaddr >> 10;
+    u_int32_t pageTableL2Index = vaddr & 0x3ff;
+    
+    PageTableL2* pageTableL2 = ptl1->pageTableL2[pageTableL1Index];
+    if (pageTableL2 == NULL) {
+        return -1;
+    }
+    PageTableEntry *pte = &(pageTableL2->pte[pageTableL2Index]);
+    if (pte->valid == 0) {
+        return -1;
+    }
+    *paddr = pte->frameAddr << 12;
+    return 0;
 }
 
 int
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
-	vaddr_t vbase1, vtop1, vbase2, vtop2, stackbase, stacktop;
 	paddr_t paddr;
-	int i;
 	u_int32_t ehi, elo;
 	struct addrspace *as;
-	int spl;
+	int i, spl;
 
 	spl = splhigh();
 
 	faultaddress &= PAGE_FRAME;
-
+    
 	DEBUG(DB_VM, "dumbvm: fault: 0x%x\n", faultaddress);
 
 	switch (faulttype) {
@@ -113,41 +133,11 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		return EFAULT;
 	}
 
-	/* Assert that the address space has been set up properly. */
-	assert(as->as_vbase1 != 0);
-	assert(as->as_pbase1 != 0);
-	assert(as->as_npages1 != 0);
-	assert(as->as_vbase2 != 0);
-	assert(as->as_pbase2 != 0);
-	assert(as->as_npages2 != 0);
-	assert(as->as_stackpbase != 0);
-	assert((as->as_vbase1 & PAGE_FRAME) == as->as_vbase1);
-	assert((as->as_pbase1 & PAGE_FRAME) == as->as_pbase1);
-	assert((as->as_vbase2 & PAGE_FRAME) == as->as_vbase2);
-	assert((as->as_pbase2 & PAGE_FRAME) == as->as_pbase2);
-	assert((as->as_stackpbase & PAGE_FRAME) == as->as_stackpbase);
-
-	vbase1 = as->as_vbase1;
-	vtop1 = vbase1 + as->as_npages1 * PAGE_SIZE;
-	vbase2 = as->as_vbase2;
-	vtop2 = vbase2 + as->as_npages2 * PAGE_SIZE;
-	stackbase = USERSTACK - DUMBVM_STACKPAGES * PAGE_SIZE;
-	stacktop = USERSTACK;
-
-	if (faultaddress >= vbase1 && faultaddress < vtop1) {
-		paddr = (faultaddress - vbase1) + as->as_pbase1;
-	}
-	else if (faultaddress >= vbase2 && faultaddress < vtop2) {
-		paddr = (faultaddress - vbase2) + as->as_pbase2;
-	}
-	else if (faultaddress >= stackbase && faultaddress < stacktop) {
-		paddr = (faultaddress - stackbase) + as->as_stackpbase;
-	}
-	else {
-		splx(spl);
+    if (GetPhysicalFrame(&as->pageTable, faultaddress, &paddr) != 0) {
+        splx(spl);
 		return EFAULT;
-	}
-
+    }
+    // assert(paddr2 == paddr);
 	/* make sure it's page-aligned */
 	assert((paddr & PAGE_FRAME)==paddr);
 
@@ -177,21 +167,42 @@ as_create(void)
 		return NULL;
 	}
 
-	as->as_vbase1 = 0;
-	as->as_pbase1 = 0;
-	as->as_npages1 = 0;
-	as->as_vbase2 = 0;
-	as->as_pbase2 = 0;
-	as->as_npages2 = 0;
-	as->as_stackpbase = 0;
+	// as->as_vbase1 = 0;
+	// as->as_pbase1 = 0;
+	// as->as_npages1 = 0;
+	// as->as_vbase2 = 0;
+	// as->as_pbase2 = 0;
+	// as->as_npages2 = 0;
+	// as->as_stackpbase = 0;
+    bzero(as, sizeof(struct addrspace));
 
 	return as;
+}
+
+void ReleasePageTable(PageTableL1* pageTable)
+{
+    unsigned i, j;
+    
+    for (i = 0; i < 512; i++) {
+        if (pageTable->pageTableL2[i]) {
+            PageTableL2* ptl2 = pageTable->pageTableL2[i];
+            for (j = 0; j < 1024; j++) {
+                if (ptl2->pte[j].valid == 1) {
+                    FreeNPages ((ptl2->pte[j].frameAddr) << 12);
+                }
+            }
+            kfree(ptl2);
+        }
+    }
 }
 
 void
 as_destroy(struct addrspace *as)
 {
+    int spl = splhigh();
+    ReleasePageTable(&as->pageTable);
 	kfree(as);
+    splx(spl);
 }
 
 void
@@ -249,28 +260,67 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 	return EUNIMP;
 }
 
+int AddOneMapping(PageTableL1 *pageTable, vaddr_t vaddr, paddr_t paddr)
+{
+    assert((paddr & 0xfffff000) == paddr);
+    assert((vaddr & 0xfffff000) == vaddr);
+    
+    vaddr = (unsigned)vaddr >> 12;
+    u_int32_t pageTableL1Index = vaddr >> 10;
+    u_int32_t pageTableL2Index = vaddr & 0x3ff;
+    
+    PageTableL2* pageTableL2 = pageTable->pageTableL2[pageTableL1Index];
+    if (pageTableL2 == NULL) {
+        pageTableL2 = kmalloc(sizeof(PageTableL2));
+        if (pageTableL2 == NULL) {
+            return ENOMEM;
+        }
+        bzero(pageTableL2, sizeof(PageTableL2));
+        pageTable->pageTableL2[pageTableL1Index] = pageTableL2;
+    }
+    PageTableEntry *pte = &(pageTableL2->pte[pageTableL2Index]);
+    assert(pte->valid == 0);
+    
+    pte->frameAddr = paddr >> 12;
+    pte->valid = 1;
+    pte->writable = 1;
+    return 0;
+}
+
+int AddNPagesOnVaddr(PageTableL1 *pageTable, vaddr_t vaddr, size_t npages)
+{
+    paddr_t paddr;
+    unsigned i;
+    for (i = 0; i < npages; i++) {
+        paddr = getppages(1);
+        if (paddr == 0)
+            return ENOMEM;
+        if (AddOneMapping(pageTable, vaddr + i * PAGE_SIZE, paddr)) {
+            return ENOMEM;
+        }
+    }
+    return 0;
+}
+
 int
 as_prepare_load(struct addrspace *as)
 {
-	assert(as->as_pbase1 == 0);
-	assert(as->as_pbase2 == 0);
-	assert(as->as_stackpbase == 0);
-
-	as->as_pbase1 = getppages(as->as_npages1);
-	if (as->as_pbase1 == 0) {
-		return ENOMEM;
-	}
-
-	as->as_pbase2 = getppages(as->as_npages2);
-	if (as->as_pbase2 == 0) {
-		return ENOMEM;
-	}
-
-	as->as_stackpbase = getppages(DUMBVM_STACKPAGES);
-	if (as->as_stackpbase == 0) {
-		return ENOMEM;
-	}
-
+    assert(as->as_vbase1 != 0);
+    assert(as->as_vbase2 != 0);
+    
+    if (AddNPagesOnVaddr(&as->pageTable, as->as_vbase1, as->as_npages1)) {
+        return ENOMEM;
+    }
+    
+    if (AddNPagesOnVaddr(&as->pageTable, as->as_vbase2, as->as_npages2)) {
+        return ENOMEM;
+    }
+    
+    if (AddNPagesOnVaddr(&as->pageTable, 
+        USERTOP - DUMBVM_STACKPAGES * PAGE_SIZE, DUMBVM_STACKPAGES)) {
+        return ENOMEM;
+    }
+    
 	return 0;
 }
 
@@ -284,10 +334,37 @@ as_complete_load(struct addrspace *as)
 int
 as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 {
-	assert(as->as_stackpbase != 0);
+	// assert(as->as_stackpbase != 0);
 
 	*stackptr = USERSTACK;
 	return 0;
+}
+
+void CopyOnePage(PageTableL1 *dest, PageTableL1 *src, vaddr_t vaddr)
+{
+    assert((vaddr & 0xfffff000) == vaddr);
+    
+    paddr_t paddrdest, paddrsrc;
+    if (GetPhysicalFrame(dest, vaddr, &paddrdest)) {
+        panic("copy to invalid page!");
+    }
+    if (GetPhysicalFrame(src, vaddr, &paddrsrc)) {
+        panic("copy from invalid page!");
+    }
+    
+    vaddr_t kvaddrdest = PADDR_TO_KVADDR(paddrdest);
+    vaddr_t kvaddrsrc = PADDR_TO_KVADDR(paddrsrc);
+    memmove((void *)kvaddrdest, (const void *)kvaddrsrc, PAGE_SIZE);
+}
+
+void CopyNPages(PageTableL1 *dest, PageTableL1 *src, vaddr_t vaddr, size_t npages)
+{
+    assert((vaddr & 0xfffff000) == vaddr);
+    
+    unsigned i;
+    for (i = 0; i < npages; i++) {
+        CopyOnePage(dest, src, vaddr + i * PAGE_SIZE);
+    }
 }
 
 int
@@ -310,21 +387,26 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 		return ENOMEM;
 	}
 
-	assert(new->as_pbase1 != 0);
-	assert(new->as_pbase2 != 0);
-	assert(new->as_stackpbase != 0);
+	// assert(new->as_pbase1 != 0);
+	// assert(new->as_pbase2 != 0);
+	// assert(new->as_stackpbase != 0);
 
-	memmove((void *)PADDR_TO_KVADDR(new->as_pbase1),
-		(const void *)PADDR_TO_KVADDR(old->as_pbase1),
-		old->as_npages1*PAGE_SIZE);
+    CopyNPages(&new->pageTable, &old->pageTable, 
+        new->as_vbase1, new->as_npages1);
+	// memmove((void *)PADDR_TO_KVADDR(new->as_pbase1),
+		// (const void *)PADDR_TO_KVADDR(old->as_pbase1),
+		// old->as_npages1*PAGE_SIZE);
 
-	memmove((void *)PADDR_TO_KVADDR(new->as_pbase2),
-		(const void *)PADDR_TO_KVADDR(old->as_pbase2),
-		old->as_npages2*PAGE_SIZE);
-
-	memmove((void *)PADDR_TO_KVADDR(new->as_stackpbase),
-		(const void *)PADDR_TO_KVADDR(old->as_stackpbase),
-		DUMBVM_STACKPAGES*PAGE_SIZE);
+    CopyNPages(&new->pageTable, &old->pageTable, 
+        new->as_vbase2, new->as_npages2);
+	// memmove((void *)PADDR_TO_KVADDR(new->as_pbase2),
+		// (const void *)PADDR_TO_KVADDR(old->as_pbase2),
+		// old->as_npages2*PAGE_SIZE);
+    CopyNPages(&new->pageTable, &old->pageTable, 
+        USERTOP - DUMBVM_STACKPAGES * PAGE_SIZE, DUMBVM_STACKPAGES);
+	// memmove((void *)PADDR_TO_KVADDR(new->as_stackpbase),
+		// (const void *)PADDR_TO_KVADDR(old->as_stackpbase),
+		// DUMBVM_STACKPAGES*PAGE_SIZE);
 	
 	*ret = new;
 	return 0;
