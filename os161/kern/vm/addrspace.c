@@ -20,6 +20,10 @@
 #include <machine/spl.h>
 #include <machine/tlb.h>
 #include <coremap.h>
+#include <uio.h>
+#include <vnode.h>
+#include <vfs.h>
+#include <kern/unistd.h>
 
 /*
  * Dumb MIPS-only "VM system" that is intended to only be just barely
@@ -97,13 +101,109 @@ int GetPhysicalFrame(PageTableL1 *ptl1, vaddr_t vaddr, paddr_t *paddr)
     return 0;
 }
 
+int update_TLB(vaddr_t vaddr, paddr_t paddr)
+{
+    unsigned i;
+    u_int32_t ehi, elo;
+    int spl = splhigh();
+    assert((paddr & PAGE_FRAME)==paddr);
+
+	for (i = 0; i < NUM_TLB; i++) {
+		TLB_Read(&ehi, &elo, i);
+		if (elo & TLBLO_VALID) {
+			continue;
+		}
+		ehi = vaddr;
+		elo = paddr | TLBLO_DIRTY | TLBLO_VALID;
+		DEBUG(DB_VM, "dumbvm: 0x%x -> 0x%x\n", vaddr, paddr);
+		TLB_Write(ehi, elo, i);
+		splx(spl);
+		return 0;
+	}
+    
+	kprintf("dumbvm: Ran out of TLB entries - cannot handle page fault\n");
+	splx(spl);
+	return EFAULT;
+}
+
+int
+LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
+{
+    assert((vaddr & 0xfffff000) == vaddr);
+    
+    paddr_t paddr;
+    off_t p_offset;
+    vaddr_t p_vaddr;
+    size_t filesize;
+    size_t memsize;
+    unsigned i;
+    int spl, result;
+    struct uio ku;
+    struct vnode *v = as->v;
+    assert(v != NULL);
+    
+    spl = splhigh();
+    paddr = getppages(1);
+    if (paddr == 0)
+        goto fail1;
+    if (AddOneMapping(&as->pageTable, vaddr, paddr)) {
+        goto fail2;
+    }
+    
+    bzero((void*)KVADDR_TO_PADDR(paddr), PAGE_SIZE);
+    splx(spl);
+    
+    for (i = 0; i < 2; i++) {
+        p_vaddr = as->elf_ph[i].p_vaddr;
+        p_offset = as->elf_ph[i].p_offset;
+        filesize = as->elf_ph[i].p_filesz;
+        memsize = as->elf_ph[i].p_memsz;
+        if (vaddr >= p_vaddr && vaddr < p_vaddr + memsize) {
+            if (filesize > memsize) {
+                kprintf("ELF: warning: segment filesize > segment memsize\n");
+                filesize = memsize;
+            }
+            vaddr_t startaddr = (userptr_t)(vaddr > p_vaddr ? vaddr : p_vaddr);
+            size_t memLen = PAGE_SIZE - ((~(vaddr_t)PAGE_FRAME) & startaddr);
+            off_t offset = p_offset + startaddr - p_vaddr;
+            
+            filesize = filesize - offset + p_offset;
+            size_t tranSize = filesize > memLen? memLen : filesize;
+            assert(tranSize <= PAGE_SIZE);
+            
+            vaddr_t kstartaddr = KVADDR_TO_PADDR(paddr + startaddr - vaddr);
+            mk_kuio(&ku, kstartaddr, tranSize, offset, UIO_READ);
+            
+            result = VOP_READ(v, &ku);
+            if (result) {
+                return result;
+            }
+
+            if (ku.uio_resid != 0) {
+                /* short read; problem with executable? */
+                kprintf("ELF: short read on segment - file truncated?\n");
+                return ENOEXEC;
+            }
+    
+        }
+    }
+    *_paddr = paddr;
+    return 0;
+    
+    
+fail2:
+    FreeNPages(paddr);
+fail1:
+    splx(spl);
+    return ENOMEM;
+}
+
 int
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
-	paddr_t paddr;
-	u_int32_t ehi, elo;
+	paddr_t paddr = 0;
 	struct addrspace *as;
-	int i, spl;
+	int i, spl, result;
 
 	spl = splhigh();
 
@@ -130,33 +230,35 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		 * fault early in boot. Return EFAULT so as to panic
 		 * instead of getting into an infinite faulting loop.
 		 */
+        splx(spl);
 		return EFAULT;
 	}
 
-    if (GetPhysicalFrame(&as->pageTable, faultaddress, &paddr) != 0) {
+    result = GetPhysicalFrame(&as->pageTable, faultaddress, &paddr);
+    if (result) {
+        // decide which region
+        for (i = 0; i < 2; i++) {
+            vaddr_t start = as->as_vbase[i];
+            vaddr_t end = as->as_npages[i] * PAGE_SIZE + start;
+            if (faultaddress >= start && faultaddress < end)
+                break;
+        }
+        if (i < 2)
+            result = LoadPage(as, faultaddress, &paddr);
+    }
+    
+    if (result) {
         splx(spl);
 		return EFAULT;
     }
-    // assert(paddr2 == paddr);
-	/* make sure it's page-aligned */
-	assert((paddr & PAGE_FRAME)==paddr);
 
-	for (i=0; i<NUM_TLB; i++) {
-		TLB_Read(&ehi, &elo, i);
-		if (elo & TLBLO_VALID) {
-			continue;
-		}
-		ehi = faultaddress;
-		elo = paddr | TLBLO_DIRTY | TLBLO_VALID;
-		DEBUG(DB_VM, "dumbvm: 0x%x -> 0x%x\n", faultaddress, paddr);
-		TLB_Write(ehi, elo, i);
-		splx(spl);
-		return 0;
-	}
-
-	kprintf("dumbvm: Ran out of TLB entries - cannot handle page fault\n");
+    result = update_TLB(faultaddress, paddr);
+    if (result) {
+        splx(spl);
+        return result;
+    }
 	splx(spl);
-	return EFAULT;
+	return 0;
 }
 
 struct addrspace *
@@ -167,13 +269,6 @@ as_create(void)
 		return NULL;
 	}
 
-	// as->as_vbase1 = 0;
-	// as->as_pbase1 = 0;
-	// as->as_npages1 = 0;
-	// as->as_vbase2 = 0;
-	// as->as_pbase2 = 0;
-	// as->as_npages2 = 0;
-	// as->as_stackpbase = 0;
     bzero(as, sizeof(struct addrspace));
 
 	return as;
@@ -201,6 +296,7 @@ as_destroy(struct addrspace *as)
 {
     int spl = splhigh();
     ReleasePageTable(&as->pageTable);
+    if (as->v) VOP_DECREF(as->v);
 	kfree(as);
     splx(spl);
 }
@@ -222,42 +318,77 @@ as_activate(struct addrspace *as)
 }
 
 int
-as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
-		 int readable, int writeable, int executable)
+as_define_eh(struct addrspace *as, struct vnode *v, Elf_Ehdr* eh)
 {
-	size_t npages; 
-
-	/* Align the region. First, the base... */
-	sz += vaddr & ~(vaddr_t)PAGE_FRAME;
-	vaddr &= PAGE_FRAME;
-
-	/* ...and now the length. */
-	sz = (sz + PAGE_SIZE - 1) & PAGE_FRAME;
-
-	npages = sz / PAGE_SIZE;
-
-	/* We don't use these - all pages are read-write */
-	(void)readable;
-	(void)writeable;
-	(void)executable;
-
-	if (as->as_vbase1 == 0) {
-		as->as_vbase1 = vaddr;
-		as->as_npages1 = npages;
-		return 0;
-	}
-
-	if (as->as_vbase2 == 0) {
-		as->as_vbase2 = vaddr;
-		as->as_npages2 = npages;
-		return 0;
-	}
-
-	/*
-	 * Support for more than two regions is not available.
+    int result, i, phi = 0;
+	struct uio ku;
+    Elf_Phdr elf_ph;
+    
+    /*
+	 * Check to make sure it's a 32-bit ELF-version-1 executable
+	 * for our processor type. If it's not, we can't run it.
 	 */
-	kprintf("dumbvm: Warning: too many regions\n");
-	return EUNIMP;
+
+	if (eh->e_ident[EI_MAG0] != ELFMAG0 ||
+	    eh->e_ident[EI_MAG1] != ELFMAG1 ||
+	    eh->e_ident[EI_MAG2] != ELFMAG2 ||
+	    eh->e_ident[EI_MAG3] != ELFMAG3 ||
+	    eh->e_ident[EI_CLASS] != ELFCLASS32 ||
+	    eh->e_ident[EI_DATA] != ELFDATA2MSB ||
+	    eh->e_ident[EI_VERSION] != EV_CURRENT ||
+	    eh->e_version != EV_CURRENT ||
+	    eh->e_type!=ET_EXEC ||
+	    eh->e_machine!=EM_MACHINE) {
+		return ENOEXEC;
+	}
+    
+    assert(as->v == NULL);
+    as->v = v;
+    VOP_INCREF(v);
+    for (i=0; i<eh->e_phnum; i++) {
+        
+		off_t offset = eh->e_phoff + i*eh->e_phentsize;
+		mk_kuio(&ku, &elf_ph, sizeof(Elf_Phdr), offset, UIO_READ);
+
+		result = VOP_READ(v, &ku);
+		if (result) {
+			return result;
+		}
+
+		if (ku.uio_resid != 0) {
+			/* short read; problem with executable? */
+			kprintf("ELF: short read on phdr - file truncated?\n");
+			return ENOEXEC;
+		}
+
+		switch (elf_ph.p_type) {
+		    case PT_NULL: /* skip */ continue;
+		    case PT_PHDR: /* skip */ continue;
+		    case PT_MIPS_REGINFO: /* skip */ continue;
+		    case PT_LOAD: break;
+		    default:
+			kprintf("loadelf: unknown segment type %d\n", 
+				elf_ph.p_type);
+			return ENOEXEC;
+		}
+        if (phi >= 2) {
+            kprintf("dumbvm: Warning: too many regions\n");
+            return EUNIMP;
+        }
+        
+        as->elf_ph[phi] = elf_ph;
+        size_t sz = (elf_ph.p_memsz 
+                        + (elf_ph.p_vaddr & (~(vaddr_t)PAGE_FRAME)) 
+                        + PAGE_SIZE - 1)
+                    & PAGE_FRAME;
+
+        as->as_npages[phi] = sz >> 12;
+        as->as_vbase[phi] = elf_ph.p_vaddr & PAGE_FRAME;
+        
+        phi++;
+	}
+    
+    return 0;
 }
 
 int AddOneMapping(PageTableL1 *pageTable, vaddr_t vaddr, paddr_t paddr)
@@ -287,6 +418,44 @@ int AddOneMapping(PageTableL1 *pageTable, vaddr_t vaddr, paddr_t paddr)
     return 0;
 }
 
+int SetPageValid(PageTableL1 *pageTable, vaddr_t vaddr, unsigned isValid)
+{
+    assert((vaddr & 0xfffff000) == vaddr);
+    
+    vaddr = (unsigned)vaddr >> 12;
+    u_int32_t pageTableL1Index = vaddr >> 10;
+    u_int32_t pageTableL2Index = vaddr & 0x3ff;
+    
+    PageTableL2* pageTableL2 = pageTable->pageTableL2[pageTableL1Index];
+    if (pageTableL2 == NULL) {
+        pageTableL2 = kmalloc(sizeof(PageTableL2));
+        if (pageTableL2 == NULL) {
+            return ENOMEM;
+        }
+        bzero(pageTableL2, sizeof(PageTableL2));
+        pageTable->pageTableL2[pageTableL1Index] = pageTableL2;
+    }
+    PageTableEntry *pte = &(pageTableL2->pte[pageTableL2Index]);
+    pte->valid = isValid;
+    return 0;
+}
+
+int IsPageValid(PageTableL1 *pageTable, vaddr_t vaddr)
+{
+        assert((vaddr & 0xfffff000) == vaddr);
+    
+    vaddr = (unsigned)vaddr >> 12;
+    u_int32_t pageTableL1Index = vaddr >> 10;
+    u_int32_t pageTableL2Index = vaddr & 0x3ff;
+    
+    PageTableL2* pageTableL2 = pageTable->pageTableL2[pageTableL1Index];
+    if (pageTableL2 == NULL) {
+        return 0;
+    }
+    PageTableEntry *pte = &(pageTableL2->pte[pageTableL2Index]);
+    return pte->valid;
+}
+
 int AddNPagesOnVaddr(PageTableL1 *pageTable, vaddr_t vaddr, size_t npages)
 {
     paddr_t paddr;
@@ -305,16 +474,16 @@ int AddNPagesOnVaddr(PageTableL1 *pageTable, vaddr_t vaddr, size_t npages)
 int
 as_prepare_load(struct addrspace *as)
 {
-    assert(as->as_vbase1 != 0);
-    assert(as->as_vbase2 != 0);
+    assert(as->as_vbase[0] != 0);
+    assert(as->as_vbase[1] != 0);
     
-    if (AddNPagesOnVaddr(&as->pageTable, as->as_vbase1, as->as_npages1)) {
-        return ENOMEM;
-    }
+    // if (AddNPagesOnVaddr(&as->pageTable, as->as_vbase[0], as->as_npages[0])) {
+        // return ENOMEM;
+    // }
     
-    if (AddNPagesOnVaddr(&as->pageTable, as->as_vbase2, as->as_npages2)) {
-        return ENOMEM;
-    }
+    // if (AddNPagesOnVaddr(&as->pageTable, as->as_vbase[1], as->as_npages[1])) {
+        // return ENOMEM;
+    // }
     
     if (AddNPagesOnVaddr(&as->pageTable, 
         USERTOP - DUMBVM_STACKPAGES * PAGE_SIZE, DUMBVM_STACKPAGES)) {
@@ -377,11 +546,15 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 		return ENOMEM;
 	}
 
-	new->as_vbase1 = old->as_vbase1;
-	new->as_npages1 = old->as_npages1;
-	new->as_vbase2 = old->as_vbase2;
-	new->as_npages2 = old->as_npages2;
-
+	new->as_vbase[0] = old->as_vbase[0];
+	new->as_npages[0] = old->as_npages[0];
+	new->as_vbase[1] = old->as_vbase[1];
+	new->as_npages[1] = old->as_npages[1];
+    new->elf_ph[0] = old->elf_ph[0];
+    new->elf_ph[1] = old->elf_ph[1];
+    new->v = old->v;
+    VOP_INCREF(new->v);
+    
 	if (as_prepare_load(new)) {
 		as_destroy(new);
 		return ENOMEM;
@@ -391,14 +564,14 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 	// assert(new->as_pbase2 != 0);
 	// assert(new->as_stackpbase != 0);
 
-    CopyNPages(&new->pageTable, &old->pageTable, 
-        new->as_vbase1, new->as_npages1);
+    // CopyNPages(&new->pageTable, &old->pageTable, 
+        // new->as_vbase[0], new->as_npages[0]);
 	// memmove((void *)PADDR_TO_KVADDR(new->as_pbase1),
 		// (const void *)PADDR_TO_KVADDR(old->as_pbase1),
 		// old->as_npages1*PAGE_SIZE);
 
-    CopyNPages(&new->pageTable, &old->pageTable, 
-        new->as_vbase2, new->as_npages2);
+    // CopyNPages(&new->pageTable, &old->pageTable, 
+        // new->as_vbase[1], new->as_npages[1]);
 	// memmove((void *)PADDR_TO_KVADDR(new->as_pbase2),
 		// (const void *)PADDR_TO_KVADDR(old->as_pbase2),
 		// old->as_npages2*PAGE_SIZE);

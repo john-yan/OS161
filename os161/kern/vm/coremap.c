@@ -119,7 +119,7 @@ void AllocateNPages(u_int32_t paddr, u_int32_t isKernelPage, u_int32_t nPages)
         pe[i].isAllocated = 1;
         pe[i].isKernelPage = isKernelPage;
     }
-    kprintf("allocate %d pages(%d).\n",nPages, pages += nPages);
+    // kprintf("allocate %d pages(%d).\n",nPages, pages += nPages);
 }
 
 void FreeNPages(u_int32_t paddr) 
@@ -132,7 +132,7 @@ void FreeNPages(u_int32_t paddr)
         assert(pe[i].isAllocated == 1);
         pe[i].isAllocated = 0;
     }
-    kprintf("free %d pages(%d).\n", nPages, pages -= nPages);
+    // kprintf("free %d pages(%d).\n", nPages, pages -= nPages);
 }
 
 void CoreMapReport()

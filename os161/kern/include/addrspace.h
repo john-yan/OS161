@@ -2,6 +2,7 @@
 #define _ADDRSPACE_H_
 
 #include <vm.h>
+#include <elf.h>
 // #include "opt-dumbvm.h"
 
 struct vnode;
@@ -12,12 +13,16 @@ struct vnode;
  *
  * You write this.
  */
+
 typedef struct {
     paddr_t    frameAddr: 20;
-    u_int32_t writable: 1;
-    u_int32_t valid: 1;
     u_int32_t global: 1; // ignore pid bits if set
-    u_int32_t unused: 8;
+    u_int32_t unused: 6;
+    u_int32_t dirty: 1;
+    u_int32_t locked: 1;
+    u_int32_t writable: 1;
+    u_int32_t swapped: 1;
+    u_int32_t valid: 1;
 } PageTableEntry;
 
 typedef struct {
@@ -40,14 +45,21 @@ typedef struct {
 #define REGION_HEAP 4
 
 struct addrspace {
-	vaddr_t as_vbase1;
+    struct vnode *v;
+	Elf_Phdr elf_ph[2];
+    
+	vaddr_t as_vbase[2];
 	// paddr_t as_pbase1;
-	size_t as_npages1;
-	vaddr_t as_vbase2;
+	size_t as_npages[2];
+    
+	// vaddr_t as_vbase2;
 	// paddr_t as_pbase2;
-	size_t as_npages2;
+	// size_t as_npages2;
+    // Elf_Phdr elf_ph2;
+    
 	paddr_t as_stackvbase;
     PageTableL1 pageTable;
+    
 };
 
 /*
@@ -88,12 +100,8 @@ struct addrspace *as_create(void);
 int               as_copy(struct addrspace *src, struct addrspace **ret);
 void              as_activate(struct addrspace *);
 void              as_destroy(struct addrspace *);
+int               as_define_eh(struct addrspace *as, struct vnode *v, Elf_Ehdr* eh);
 
-int               as_define_region(struct addrspace *as, 
-				   vaddr_t vaddr, size_t sz,
-				   int readable, 
-				   int writeable,
-				   int executable);
 int		  as_prepare_load(struct addrspace *as);
 int		  as_complete_load(struct addrspace *as);
 int               as_define_stack(struct addrspace *as, vaddr_t *initstackptr);
