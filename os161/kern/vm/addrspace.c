@@ -121,7 +121,10 @@ int update_TLB(vaddr_t vaddr, paddr_t paddr)
 		return 0;
 	}
     
-	kprintf("dumbvm: Ran out of TLB entries - cannot handle page fault\n");
+    as_activate(curthread->t_vmspace); // invalid all entry
+    ehi = vaddr;
+    elo = paddr | TLBLO_DIRTY | TLBLO_VALID;
+    TLB_Write(ehi, elo, i);
 	splx(spl);
 	return EFAULT;
 }
@@ -167,8 +170,9 @@ LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
             size_t memLen = PAGE_SIZE - ((~(vaddr_t)PAGE_FRAME) & startaddr);
             off_t offset = p_offset + startaddr - p_vaddr;
             
-            filesize = filesize - offset + p_offset;
-            size_t tranSize = filesize > memLen? memLen : filesize;
+            if (filesize + p_offset > offset)
+                filesize = filesize + p_offset - offset;
+            size_t tranSize = filesize > memLen ? memLen : filesize;
             assert(tranSize <= PAGE_SIZE);
             
             vaddr_t kstartaddr = KVADDR_TO_PADDR(paddr + startaddr - vaddr);
@@ -190,6 +194,50 @@ LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     *_paddr = paddr;
     return 0;
     
+    
+fail2:
+    FreeNPages(paddr);
+fail1:
+    splx(spl);
+    return ENOMEM;
+}
+
+int IsOnStackRegion(size_t stacksize, vaddr_t vaddr) 
+{
+    vaddr_t start = USERSTACK - stacksize * PAGE_SIZE;
+    vaddr_t end = USERSTACK;
+    
+    if (vaddr < end && vaddr >= (start - PAGE_SIZE))
+        return 1;
+    else
+        return 0;
+}
+
+int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
+{
+    assert((vaddr & 0xfffff000) == vaddr);
+    
+    paddr_t paddr;
+    unsigned i;
+    int spl, result;
+    struct uio ku;
+    struct vnode *v = as->v;
+    assert(v != NULL);
+    
+    spl = splhigh();
+    paddr = getppages(1);
+    if (paddr == 0)
+        goto fail1;
+    if (AddOneMapping(&as->pageTable, vaddr, paddr)) {
+        goto fail2;
+    }
+    as->stacksize++;
+    
+    splx(spl);
+    bzero((void*)KVADDR_TO_PADDR(paddr), PAGE_SIZE);
+    
+    *_paddr = paddr;
+    return 0;
     
 fail2:
     FreeNPages(paddr);
@@ -237,14 +285,18 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     result = GetPhysicalFrame(&as->pageTable, faultaddress, &paddr);
     if (result) {
         // decide which region
-        for (i = 0; i < 2; i++) {
-            vaddr_t start = as->as_vbase[i];
-            vaddr_t end = as->as_npages[i] * PAGE_SIZE + start;
-            if (faultaddress >= start && faultaddress < end)
-                break;
+        if (IsOnStackRegion(as->stacksize, faultaddress)) {
+            result = IncreaseStack(as, faultaddress, &paddr);
+        } else {
+            for (i = 0; i < 2; i++) {
+                vaddr_t start = as->region[i].regionBase << 12;
+                vaddr_t end = as->region[i].nPages * PAGE_SIZE + start;
+                if (faultaddress >= start && faultaddress < end)
+                    break;
+            }
+            if (i < 2)
+                result = LoadPage(as, faultaddress, &paddr);
         }
-        if (i < 2)
-            result = LoadPage(as, faultaddress, &paddr);
     }
     
     if (result) {
@@ -382,8 +434,8 @@ as_define_eh(struct addrspace *as, struct vnode *v, Elf_Ehdr* eh)
                         + PAGE_SIZE - 1)
                     & PAGE_FRAME;
 
-        as->as_npages[phi] = sz >> 12;
-        as->as_vbase[phi] = elf_ph.p_vaddr & PAGE_FRAME;
+        as->region[phi].nPages = sz >> 12;
+        as->region[phi].regionBase = (elf_ph.p_vaddr & PAGE_FRAME) >> 12;
         
         phi++;
 	}
@@ -474,8 +526,8 @@ int AddNPagesOnVaddr(PageTableL1 *pageTable, vaddr_t vaddr, size_t npages)
 int
 as_prepare_load(struct addrspace *as)
 {
-    assert(as->as_vbase[0] != 0);
-    assert(as->as_vbase[1] != 0);
+    // assert(as->as_vbase[0] != 0);
+    // assert(as->as_vbase[1] != 0);
     
     // if (AddNPagesOnVaddr(&as->pageTable, as->as_vbase[0], as->as_npages[0])) {
         // return ENOMEM;
@@ -485,10 +537,10 @@ as_prepare_load(struct addrspace *as)
         // return ENOMEM;
     // }
     
-    if (AddNPagesOnVaddr(&as->pageTable, 
-        USERTOP - DUMBVM_STACKPAGES * PAGE_SIZE, DUMBVM_STACKPAGES)) {
-        return ENOMEM;
-    }
+    // if (AddNPagesOnVaddr(&as->pageTable, 
+        // USERTOP - DUMBVM_STACKPAGES * PAGE_SIZE, DUMBVM_STACKPAGES)) {
+        // return ENOMEM;
+    // }
     
 	return 0;
 }
@@ -504,7 +556,7 @@ int
 as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 {
 	// assert(as->as_stackpbase != 0);
-
+    as->stacksize = 0;
 	*stackptr = USERSTACK;
 	return 0;
 }
@@ -540,22 +592,29 @@ int
 as_copy(struct addrspace *old, struct addrspace **ret)
 {
 	struct addrspace *new;
-
+    int i;
+    
 	new = as_create();
 	if (new==NULL) {
 		return ENOMEM;
 	}
 
-	new->as_vbase[0] = old->as_vbase[0];
-	new->as_npages[0] = old->as_npages[0];
-	new->as_vbase[1] = old->as_vbase[1];
-	new->as_npages[1] = old->as_npages[1];
-    new->elf_ph[0] = old->elf_ph[0];
-    new->elf_ph[1] = old->elf_ph[1];
+    for (i = 0; i < 2; i++) {
+        new->region[i] = old->region[i];
+        new->elf_ph[i] = old->elf_ph[i];
+    }
+	// new->as_vbase[0] = old->as_vbase[0];
+	// new->as_npages[0] = old->as_npages[0];
+	// new->as_vbase[1] = old->as_vbase[1];
+	// new->as_npages[1] = old->as_npages[1];
+    // new->elf_ph[0] = old->elf_ph[0];
+    new->stacksize = old->stacksize;
     new->v = old->v;
     VOP_INCREF(new->v);
     
-	if (as_prepare_load(new)) {
+	if (AddNPagesOnVaddr(&new->pageTable, 
+            USERTOP - old->stacksize * PAGE_SIZE,
+            old->stacksize)) {
 		as_destroy(new);
 		return ENOMEM;
 	}
@@ -576,7 +635,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 		// (const void *)PADDR_TO_KVADDR(old->as_pbase2),
 		// old->as_npages2*PAGE_SIZE);
     CopyNPages(&new->pageTable, &old->pageTable, 
-        USERTOP - DUMBVM_STACKPAGES * PAGE_SIZE, DUMBVM_STACKPAGES);
+        USERTOP - old->stacksize * PAGE_SIZE, old->stacksize);
 	// memmove((void *)PADDR_TO_KVADDR(new->as_stackpbase),
 		// (const void *)PADDR_TO_KVADDR(old->as_stackpbase),
 		// DUMBVM_STACKPAGES*PAGE_SIZE);

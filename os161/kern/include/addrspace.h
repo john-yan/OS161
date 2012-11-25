@@ -35,29 +35,29 @@ typedef struct {
 
 typedef struct {
     vaddr_t regionBase: 20; // virtual frame address 4k alignment
-    u_int32_t regionLength: 12; // size of the region
-    u_int32_t regionType;
+    u_int32_t nPages: 12; // size of the region
+    u_int32_t property;
 } Region;
 
-#define REGION_TEXT 1
-#define REGION_DATA 2
-#define REGION_STACK 3
-#define REGION_HEAP 4
+#define RG_R 1
+#define RG_W 2
 
 struct addrspace {
     struct vnode *v;
 	Elf_Phdr elf_ph[2];
-    
-	vaddr_t as_vbase[2];
+    Region region[2];
+	// vaddr_t as_vbase[2];
 	// paddr_t as_pbase1;
-	size_t as_npages[2];
+	// size_t as_npages[2];
     
 	// vaddr_t as_vbase2;
 	// paddr_t as_pbase2;
 	// size_t as_npages2;
     // Elf_Phdr elf_ph2;
     
-	paddr_t as_stackvbase;
+    size_t stacksize;
+    Region heap;
+	// paddr_t as_stackvbase;
     PageTableL1 pageTable;
     
 };
