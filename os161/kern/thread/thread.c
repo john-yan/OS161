@@ -396,7 +396,7 @@ void
 mi_switch(threadstate_t nextstate)
 {
 	struct thread *cur, *next;
-	int result;
+	int result = 0;
 	
 	/* Interrupts should already be off. */
 	assert(curspl>0);

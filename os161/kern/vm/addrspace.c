@@ -66,17 +66,17 @@ vm_bootstrap(void)
 
 static
 paddr_t
-getppages(unsigned long npages)
+getppages()
 {
 	int spl;
 	paddr_t addr;
 
 	spl = splhigh();
     
-	addr = GetNFreePage(npages);
+	addr = GetNFreePage(1);
     // kprintf("getpages.\n");
 	if (addr) 
-        AllocateNPages(addr, 0, npages);
+        AllocateNPages(addr, 0, 1);
     // CoreMapReport();
 	splx(spl);
 	return addr;
@@ -452,7 +452,7 @@ static int AddNPagesOnVaddr(PageTableL1 *pageTable, vaddr_t vaddr, size_t npages
     paddr_t paddr;
     unsigned i;
     for (i = 0; i < npages; i++) {
-        paddr = getppages(1);
+        paddr = getppages();
         if (paddr == 0)
             return ENOMEM;
         if (AddOneMapping(pageTable, vaddr + i * PAGE_SIZE, paddr)) {
@@ -545,7 +545,7 @@ LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     assert(v != NULL);
     
     spl = splhigh();
-    paddr = getppages(1);
+    paddr = getppages();
     if (paddr == 0)
         goto fail1;
     if (AddOneMapping(&as->pageTable, vaddr, paddr)) {
@@ -620,7 +620,7 @@ static int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     int spl;
     
     spl = splhigh();
-    paddr = getppages(1);
+    paddr = getppages();
     if (paddr == 0)
         goto fail1;
     if (AddOneMapping(&as->pageTable, vaddr, paddr)) {
