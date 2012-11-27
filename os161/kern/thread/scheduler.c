@@ -11,6 +11,35 @@
 #include <thread.h>
 #include <machine/spl.h>
 #include <queue.h>
+#include <list.h>
+
+// #define REMOVEHEAD(head, tail, node) \
+// {\
+    // if (tail == head) { \
+        // node = head;\
+        // head = NULL;\
+        // tail = NULL;\
+    // } else {\
+        // node = head;\
+        // head = head->next;\
+        // assert(head != NULL);\
+        // assert(tail != NULL);\
+    // }\
+    // if (node) node->next = NULL;\
+// }
+
+// #define ADDTOTAIL(head, tail, node) \
+// {\
+    // if (tail == NULL) {\
+        // assert(head == NULL);\
+        // tail = node; \
+        // head = node;\
+    // } else {\
+        // assert(head != NULL);\
+        // tail->next = node;\
+        // tail = node;\
+    // }\
+// }
 
 /*
  *  Scheduler data
@@ -18,6 +47,8 @@
 
 // Queue of runnable threads
 static struct queue *runqueue;
+static struct thread *nextToRun = NULL;
+static struct thread *tail = NULL;
 
 /*
  * Setup function
@@ -29,6 +60,8 @@ scheduler_bootstrap(void)
 	if (runqueue == NULL) {
 		panic("scheduler: Could not create run queue\n");
 	}
+    nextToRun = NULL;
+    tail = NULL;
 }
 
 /*
@@ -91,6 +124,7 @@ scheduler(void)
 	assert(curspl>0);
 	
 	while (q_empty(runqueue)) {
+        assert(nextToRun == NULL);
 		cpu_idle();
 	}
 
@@ -100,8 +134,12 @@ scheduler(void)
 	// prohibitive.
 	// 
 	//print_run_queue();
-	
-	return q_remhead(runqueue);
+	struct thread * th = q_remhead(runqueue);
+    assert(th == nextToRun);
+    assert(nextToRun != NULL);
+    
+    REMOVEHEAD(nextToRun, tail, th);
+	return th;
 }
 
 /* 
@@ -113,7 +151,8 @@ make_runnable(struct thread *t)
 {
 	// meant to be called with interrupts off
 	assert(curspl>0);
-
+    assert(t->next == NULL);
+    ADDTOTAIL(nextToRun, tail, t);
 	return q_addtail(runqueue, t);
 }
 

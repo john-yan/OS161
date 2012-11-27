@@ -28,7 +28,7 @@ typedef enum {
 struct thread *curthread;
 
 /* Table of sleeping threads. */
-static struct array *sleepers;
+// static struct array *sleepers;
 
 /* List of dead threads to be disposed of. */
 static struct array *zombies;
@@ -116,6 +116,8 @@ thread_create(const char *name)
 	thread->t_vmspace = NULL;
 
 	thread->t_cwd = NULL; 
+    
+    thread->next = NULL;
 	
 	// If you add things to the thread structure, be sure to initialize
 	// them here.
@@ -142,6 +144,7 @@ thread_destroy(struct thread *thread)
 	assert(thread->t_vmspace==NULL);
 	assert(thread->t_cwd==NULL);
 	assert(thread->t_miPCB == NULL);
+    assert(thread->next == NULL);
     
 	if (thread->t_stack) {
 		kfree(thread->t_stack);
@@ -545,6 +548,7 @@ thread_exit(void)
     curthread->t_miPCB = NULL;
 	assert(numthreads>0);
 	numthreads--;
+    assert(curthread->next == NULL);
 	mi_switch(S_ZOMB);
 
 	panic("Thread came back from the dead!\n");

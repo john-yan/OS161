@@ -40,6 +40,7 @@ struct thread {
 	 * and is manipulated by the virtual filesystem (VFS) code.
 	 */
 	struct vnode *t_cwd;
+    struct thread *next;
 };
 
 void MiPCBDestroy(struct MiPCB* mipcb);

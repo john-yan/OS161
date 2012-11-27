@@ -21,8 +21,7 @@ int sys_fork(struct trapframe *tf, int* err)
     struct trapframe *newtf = kmalloc(sizeof(struct trapframe));
     if (newtf == NULL) {
         *err = ENOMEM;
-        splx(spl);
-        return -1;
+        goto fail;
     }
     memmove(newtf, tf, sizeof(struct trapframe));
     
@@ -30,10 +29,8 @@ int sys_fork(struct trapframe *tf, int* err)
     /* Copy the address space. */
 	ret = as_copy(curthread->t_vmspace, &t_vmspace);
 	if (ret) {
-        kfree(newtf);
-        splx(spl);
         *err = ENOMEM;
-		return -1;
+		goto fail1;
 	}
     
     // create a new thread
@@ -42,11 +39,8 @@ int sys_fork(struct trapframe *tf, int* err)
 			newtf /* thread arg */, 1 /* thread arg */,
 			md_forkentry, &newth);
     if (ret) {
-        as_destroy(t_vmspace);
-        kfree(newtf);
-        splx(spl);
         *err = ENOMEM;
-        return -1;
+        goto fail2;
     }
     newth->t_vmspace = t_vmspace;
     
@@ -55,6 +49,14 @@ int sys_fork(struct trapframe *tf, int* err)
     
     // on success
     return newid;
+    
+fail2:
+    as_destroy(t_vmspace);
+fail1:
+    kfree(newtf);
+fail:
+    splx(spl);
+    return -1;
 }
 
 static
