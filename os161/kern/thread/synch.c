@@ -118,7 +118,7 @@ lock_create(const char *name)
 	}
 	
     lock->holdingThread = NULL;
-    lock->waitqueue = q_create(1);
+    lock->waitqueue = q_create(5);
     if (lock->waitqueue == NULL) {
         kfree(lock->name);
         kfree(lock);

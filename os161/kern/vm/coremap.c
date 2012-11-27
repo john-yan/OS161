@@ -20,14 +20,12 @@ typedef struct {
 } TLBLoEntry;
 
 typedef struct _PageEntry{
-    TLBLoEntry tlblo;
-    TLBHiEntry tlbhi;
     u_int32_t  isAllocated: 1;
     u_int32_t  isKernelPage: 1;
     u_int32_t  nContinousPages: 20;
     u_int32_t  unused: 10;
     // /* other info */
-    struct _PageEntry* next;
+    struct addrspace* ref;
     
 } PageEntry;
 
@@ -110,9 +108,6 @@ void AllocateNPages(u_int32_t paddr, u_int32_t isKernelPage, u_int32_t nPages)
     
     unsigned int i = 0;
     PageEntry* pe = GETPAGEENTRY(paddr);
-    // assert(pe->nContinousPages >= nPages);
-    // if (pe + nPages < LASTENTRY)
-        // pe[nPages].nContinousPages = pe->nContinousPages - nPages;
     pe->nContinousPages = nPages;
     for (i = 0; i < nPages; i++) {
         assert(pe[i].isAllocated == 0);

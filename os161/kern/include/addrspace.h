@@ -43,22 +43,15 @@ typedef struct {
 #define RG_W 2
 
 struct addrspace {
+    struct lock* lk;
     struct vnode *v;
 	Elf_Phdr elf_ph[2];
     Region region[2];
-	// vaddr_t as_vbase[2];
-	// paddr_t as_pbase1;
-	// size_t as_npages[2];
-    
-	// vaddr_t as_vbase2;
-	// paddr_t as_pbase2;
-	// size_t as_npages2;
-    // Elf_Phdr elf_ph2;
+	Region heap;
     
     size_t stacksize;
-    Region heap;
-	// paddr_t as_stackvbase;
-    PageTableL1 pageTable;
+    
+	PageTableL1 pageTable;
     
 };
 
