@@ -34,6 +34,7 @@
     if (head) {\
         node = head;\
         head = head->next;\
+        if (node) node->next = NULL;\
     }\
 }
 

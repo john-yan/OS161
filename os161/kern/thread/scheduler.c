@@ -58,11 +58,11 @@ scheduler_preallocate(int nthreads)
 void
 scheduler_killall(void)
 {
-    panic("not used.");
+    // panic("not used.");
 	assert(curspl>0);
 	while (!q_empty(runqueue)) {
 		struct thread *t = q_remhead(runqueue);
-		kprintf("scheduler: Dropping thread %s.\n", t->t_name);
+		kprintf("scheduler: Dropping thread.\n");
 	}
 }
 
@@ -145,7 +145,7 @@ print_run_queue(void)
 	
 	while (i!=q_getend(runqueue)) {
 		struct thread *t = q_getguy(runqueue, i);
-		kprintf("  %2d: %s\n", k, t->t_name);
+		// kprintf("  %2d: %s\n", k, t->t_name);
 		i=(i+1)%q_getsize(runqueue);
 		k++;
 	}

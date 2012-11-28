@@ -15,7 +15,10 @@
 #include "opt-synchprobs.h"
 #include <queue.h>
 #include <synch.h>
+#include <list.h>
+#include <threadqueue.h>
 
+#define MAXALLOWTHREAD 64
 /* States a thread can be in. */
 typedef enum {
 	S_RUN,
@@ -27,14 +30,17 @@ typedef enum {
 /* Global variable for the thread currently executing at any given time. */
 struct thread *curthread;
 
+static struct lock thMon;
+static struct cv   thWait;
+static struct thread *totalThread[MAXALLOWTHREAD];
+static int numthreads;
+
 /* Table of sleeping threads. */
 // static struct array *sleepers;
 
 /* List of dead threads to be disposed of. */
-static struct array *zombies;
-
-/* Total number of outstanding threads. Does not count zombies[]. */
-static int numthreads;
+// static struct array *zombies;
+static struct thread *zombieList = NULL;
 
 // new process id, increment by 1 for each new process
 static int newID = 0;
@@ -104,21 +110,17 @@ thread_create(const char *name)
 		return NULL;
     }
     
-	thread->t_name = kstrdup(name);
-	if (thread->t_name==NULL) {
-        MiPCBDestroy(thread->t_miPCB);
-		kfree(thread);
-		return NULL;
-	}
+	// thread->t_name = kstrdup(name);
+	// if (thread->t_name==NULL) {
+        // MiPCBDestroy(thread->t_miPCB);
+		// kfree(thread);
+		// return NULL;
+	// }
 	// thread->t_sleepaddr = NULL;
 	thread->t_stack = NULL;
-	
 	thread->t_vmspace = NULL;
-
 	thread->t_cwd = NULL; 
-    
     thread->next = NULL;
-	
 	// If you add things to the thread structure, be sure to initialize
 	// them here.
 	
@@ -150,7 +152,7 @@ thread_destroy(struct thread *thread)
 		kfree(thread->t_stack);
 	}
     
-	kfree(thread->t_name);
+	// kfree(thread->t_name);
 	kfree(thread);
 }
 
@@ -163,16 +165,20 @@ static
 void
 exorcise(void)
 {
-    int i, result;
+    int i, result = 0;
 
     assert(curspl>0);
 
-    for (i=0; i<array_getnum(zombies); i++) {
-        struct thread *z = array_getguy(zombies, i);
-        assert(z!=curthread);
-        thread_destroy(z);
+    while(!ISEMPTY(zombieList)) {
+    // for (i=0; i<array_getnum(zombies); i++) {
+        struct thread *t;
+        REMOVEHEAD_H(zombieList, t);
+        // struct thread *z = array_getguy(zombies, i);
+        // assert(t == z);
+        assert(t!=curthread);
+        thread_destroy(t);
     }
-    result = array_setsize(zombies, 0);
+    // result = array_setsize(zombies, 0);
     /* Shrinking the array; not supposed to be able to fail. */
     assert(result==0);
 }
@@ -185,32 +191,6 @@ static
 void
 thread_killall(void)
 {
-	// int i, result;
-
-	// assert(curspl>0);
-
-	/*
-	 * Move all sleepers to the zombie list, to be sure they don't
-	 * wake up while we're shutting down.
-	 */
-
-	//for (i=0; i<array_getnum(sleepers); i++) {
-	//	struct thread *t = array_getguy(sleepers, i);
-	//	kprintf("sleep: Dropping thread %s\n", t->t_name);
-
-		/*
-		 * Don't do this: because these threads haven't
-		 * been through thread_exit, thread_destroy will
-		 * get upset. Just drop the threads on the floor,
-		 * which is safer anyway during panic.
-		 *
-		 * array_add(zombies, t);
-		 */
-	//}
-
-	//result = array_setsize(sleepers, 0);
-	/* shrinking array: not supposed to fail */
-	//assert(result==0);
 }
 
 /*
@@ -232,17 +212,6 @@ struct thread *
 thread_bootstrap(void)
 {
 	struct thread *me;
-
-	/* Create the data structures we need. */
-	// sleepers = array_create();
-	// if (sleepers==NULL) {
-		// panic("Cannot create sleepers array\n");
-	// }
-
-	zombies = array_create();
-	if (zombies==NULL) {
-		panic("Cannot create zombies array\n");
-	}
 	
 	/*
 	 * Create the thread structure for the first thread
@@ -277,12 +246,6 @@ thread_bootstrap(void)
 void
 thread_shutdown(void)
 {
-	// array_destroy(sleepers);
-	// sleepers = NULL;
-	// array_destroy(zombies);
-	// zombies = NULL;
-	// Don't do this - it frees our stack and we blow up
-	//thread_destroy(curthread);
 }
 
 /*
@@ -308,7 +271,7 @@ thread_fork(const char *name,
 	/* Allocate a stack */
 	newguy->t_stack = kmalloc(STACK_SIZE);
 	if (newguy->t_stack==NULL) {
-		kfree(newguy->t_name);
+		// kfree(newguy->t_name);
 		kfree(newguy);
 		return ENOMEM;
 	}
@@ -330,25 +293,6 @@ thread_fork(const char *name,
 
 	/* Interrupts off for atomicity */
 	s = splhigh();
-
-	/*
-	 * Make sure our data structures have enough space, so we won't
-	 * run out later at an inconvenient time.
-	 */
-	// result = array_preallocate(sleepers, numthreads+1);
-	// if (result) {
-		// goto fail;
-	// }
-	result = array_preallocate(zombies, numthreads+1);
-	if (result) {
-		goto fail;
-	}
-
-	/* Do the same for the scheduler. */
-	result = scheduler_preallocate(numthreads+1);
-	if (result) {
-		goto fail;
-	}
 
 	/* Make the new thread runnable */
 	result = make_runnable(newguy);
@@ -385,7 +329,88 @@ thread_fork(const char *name,
 		VOP_DECREF(newguy->t_cwd);
 	}
 	kfree(newguy->t_stack);
-	kfree(newguy->t_name);
+	// kfree(newguy->t_name);
+	kfree(newguy);
+
+	return result;
+}
+
+/*
+ * Create a new thread based on an existing one.
+ * The new thread has name NAME, and starts executing in function FUNC.
+ * DATA1 and DATA2 are passed to FUNC.
+ */
+int
+thread_fork_norun(const char *name, 
+	    void *data1, unsigned long data2,
+	    void (*func)(void *, unsigned long),
+	    struct thread **ret)
+{
+	struct thread *newguy;
+	int s, result;
+
+	/* Allocate a thread */
+	newguy = thread_create(name);
+	if (newguy==NULL) {
+		return ENOMEM;
+	}
+
+	/* Allocate a stack */
+	newguy->t_stack = kmalloc(STACK_SIZE);
+	if (newguy->t_stack==NULL) {
+		// kfree(newguy->t_name);
+		kfree(newguy);
+		return ENOMEM;
+	}
+
+	/* stick a magic number on the bottom end of the stack */
+	newguy->t_stack[0] = 0xae;
+	newguy->t_stack[1] = 0x11;
+	newguy->t_stack[2] = 0xda;
+	newguy->t_stack[3] = 0x33;
+
+	/* Inherit the current directory */
+	if (curthread->t_cwd != NULL) {
+		VOP_INCREF(curthread->t_cwd);
+		newguy->t_cwd = curthread->t_cwd;
+	}
+
+	/* Set up the pcb (this arranges for func to be called) */
+	md_initpcb(&newguy->t_pcb, newguy->t_stack, data1, data2, func);
+
+	/* Interrupts off for atomicity */
+	s = splhigh();
+
+	/*
+	 * Increment the thread counter. This must be done atomically
+	 * with the preallocate calls; otherwise the count can be
+	 * temporarily too low, which would obviate its reason for
+	 * existence.
+	 */
+	numthreads++;
+
+	/* Done with stuff that needs to be atomic */
+	splx(s);
+
+	/*
+	 * Return new thread structure if it's wanted.  Note that
+	 * using the thread structure from the parent thread should be
+	 * done only with caution, because in general the child thread
+	 * might exit at any time.
+	 */
+	if (ret != NULL) {
+		*ret = newguy;
+	}
+
+	return 0;
+
+ fail:
+	splx(s);
+	if (newguy->t_cwd != NULL) {
+		VOP_DECREF(newguy->t_cwd);
+	}
+	kfree(newguy->t_stack);
+	// kfree(newguy->t_name);
 	kfree(newguy);
 
 	return result;
@@ -446,7 +471,8 @@ mi_switch(threadstate_t nextstate)
 	}
 	else {
 		assert(nextstate==S_ZOMB);
-		result = array_add(zombies, cur);
+		// result = array_add(zombies, cur);
+        ADDTOHEAD_H(zombieList, cur);
 	}
 	assert(result==0);
 

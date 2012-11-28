@@ -9,7 +9,7 @@
 #include <machine/pcb.h>
 #include <mipcb.h>
 #include <queue.h>
-#include <list.h>
+#include <synch.h>
 
 extern struct thread *curthread;
 struct addrspace;
@@ -20,10 +20,19 @@ struct thread {
 	/**********************************************************/
 	
 	struct pcb t_pcb;
-	char *t_name;
+	// char *t_name;
 	// struct queue* t_sleepaddr;
 	char *t_stack;
-	
+    
+	/**********************************************************/
+	/* Private process members - internal to the process system */
+	/**********************************************************/
+	int processID;
+    struct thread *parent;
+    struct array *children;
+    struct semaphore waitOnExit;
+    int isExit;
+    int exitCode;
 	/**********************************************************/
 	/* Public thread members - can be used by other code      */
 	/**********************************************************/
@@ -43,11 +52,6 @@ struct thread {
 	struct vnode *t_cwd;
     struct thread *next;
 };
-
-typedef struct {
-    struct thread* head;
-    struct thread* tail;
-} ThreadQueue;
 
 void MiPCBDestroy(struct MiPCB* mipcb);
 struct MiPCB * MiPCBGetNew(struct thread* myTh);
@@ -77,6 +81,11 @@ thread_fork(const char *name,
 		void (*func)(void *, unsigned long),
 		struct thread **ret);
 
+int
+thread_fork_norun(const char *name, 
+	    void *data1, unsigned long data2,
+	    void (*func)(void *, unsigned long),
+	    struct thread **ret);
 /*
  * Cause the current thread to exit.
  * Interrupts need not be disabled.
@@ -115,7 +124,7 @@ void thread_wakeupAll(ThreadQueue *tq);
  */
 int thread_hassleepers(ThreadQueue *tq);
 
-
+int make_runnable(struct thread *t);
 /*
  * Private thread functions.
  */
@@ -126,10 +135,5 @@ void mi_threadstart(void *data1, unsigned long data2,
 
 /* Machine dependent context switch. */
 void md_switch(struct pcb *old, struct pcb *nu);
-
-void TQInit(ThreadQueue* tq);
-void TQAddToTail(ThreadQueue* tq, struct thread* t) ;
-struct thread* TQRemoveHead(ThreadQueue* tq);
-int TQIsEmpty(ThreadQueue* tq);
 
 #endif /* _THREAD_H_ */

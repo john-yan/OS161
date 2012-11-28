@@ -4,7 +4,7 @@
 
 #ifndef _SYNCH_H_
 #define _SYNCH_H_
-#include <thread.h>
+#include <threadqueue.h>
 
 /*
  * Dijkstra-style semaphore.
@@ -20,13 +20,14 @@
  */
 
 struct semaphore {
-	char *name;
+	// char *name;
     // struct queue* waitqueue;
     ThreadQueue tq;
 	volatile int count;
 };
 
 struct semaphore *sem_create(const char *name, int initial_count);
+void            sem_init(struct semaphore* sem, int initial_count);
 #define Down(x) P(x)
 #define Up(x) V(x)
 void              P(struct semaphore *);
@@ -54,7 +55,7 @@ void              sem_destroy(struct semaphore *);
  */
 
 struct lock {
-	char *name;
+	// char *name;
     volatile struct thread *holdingThread;
     // struct queue *waitqueue;
     ThreadQueue tq;
@@ -64,6 +65,7 @@ struct lock {
 };
 
 struct lock *lock_create(const char *name);
+void         lock_init(struct lock*);
 void         lock_acquire(struct lock *);
 void         lock_release(struct lock *);
 int          lock_do_i_hold(struct lock *);
@@ -97,7 +99,7 @@ void         lock_destroy(struct lock *);
  */
 
 struct cv {
-	char *name;
+	// char *name;
     // struct queue* waitqueue;
     ThreadQueue tq;
 	// add what you need here

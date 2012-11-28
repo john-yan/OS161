@@ -27,16 +27,23 @@ sem_create(const char *namearg, int initial_count)
 		return NULL;
 	}
 
-	sem->name = kstrdup(namearg);
-	if (sem->name == NULL) {
-		kfree(sem);
-		return NULL;
-	}
+    (void)namearg;
+	// sem->name = kstrdup(namearg);
+	// if (sem->name == NULL) {
+		// kfree(sem);
+		// return NULL;
+	// }
 
     // sem->waitqueue = q_create(1);
 	sem->count = initial_count;
     TQInit(&sem->tq);
 	return sem;
+}
+
+void sem_init(struct semaphore* sem, int initial_count)
+{
+    sem->count = initial_count;
+    TQInit(&sem->tq);
 }
 
 void
@@ -60,7 +67,7 @@ sem_destroy(struct semaphore *sem)
 	 */
 
     // q_destroy(sem->waitqueue);
-	kfree(sem->name);
+	// kfree(sem->name);
 	kfree(sem);
 }
 
@@ -113,11 +120,12 @@ lock_create(const char *name)
 		return NULL;
 	}
 
-	lock->name = kstrdup(name);
-	if (lock->name == NULL) {
-		kfree(lock);
-		return NULL;
-	}
+    (void)name;
+	// lock->name = kstrdup(name);
+	// if (lock->name == NULL) {
+		// kfree(lock);
+		// return NULL;
+	// }
 	
     lock->holdingThread = NULL;
     // lock->waitqueue = q_create(5);
@@ -133,6 +141,12 @@ lock_create(const char *name)
 	return lock;
 }
 
+void lock_init(struct lock* lock)
+{
+    TQInit(&lock->tq);
+    lock->holdingThread = NULL;
+}
+
 void
 lock_destroy(struct lock *lock)
 {
@@ -143,7 +157,7 @@ lock_destroy(struct lock *lock)
     
 	// add stuff here as needed
 	// q_destroy(lock->waitqueue);
-	kfree(lock->name);
+	// kfree(lock->name);
 	kfree(lock);
 }
 
@@ -218,11 +232,11 @@ cv_create(const char *name)
 		return NULL;
 	}
 
-	cv->name = kstrdup(name);
-	if (cv->name==NULL) {
-		kfree(cv);
-		return NULL;
-	}
+	// cv->name = kstrdup(name);
+	// if (cv->name==NULL) {
+		// kfree(cv);
+		// return NULL;
+	// }
 	
     // cv->waitqueue = q_create(5);
     // if (cv->waitqueue == NULL) {
@@ -241,7 +255,7 @@ cv_destroy(struct cv *cv)
 	assert(cv != NULL);
 
     // q_destroy(cv->waitqueue);
-	kfree(cv->name);
+	// kfree(cv->name);
 	kfree(cv);
 }
 
