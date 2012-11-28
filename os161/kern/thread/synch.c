@@ -87,6 +87,7 @@ P(struct semaphore *sem)
 
 	spl = splhigh();
 	while (sem->count==0) {
+        assert(curthread != NULL);
 		thread_sleep(&sem->tq);
 	}
 	assert(sem->count>0);
@@ -102,6 +103,7 @@ V(struct semaphore *sem)
 	spl = splhigh();
 	sem->count++;
 	assert(sem->count>0);
+    // assert(curthread != NULL);
 	thread_wakeup(&sem->tq);
 	splx(spl);
 }
@@ -170,6 +172,8 @@ lock_acquire(struct lock *lock)
     int spl;
     spl = splhigh();
 
+    assert(curthread != NULL);
+    // assert(lock->holdingThread != curthread);
     if (lock->holdingThread != curthread) {
         // if the current thread is the holding thread,
         // then nothing needed to be done.
@@ -185,6 +189,7 @@ lock_acquire(struct lock *lock)
 
         lock->holdingThread = curthread;
     }
+    assert(lock->holdingThread = curthread);
     // enable interrupt
     splx(spl);
 }
@@ -249,6 +254,11 @@ cv_create(const char *name)
 	return cv;
 }
 
+void       cv_init(struct cv* cv)
+{
+    TQInit(&cv->tq);
+}
+
 void
 cv_destroy(struct cv *cv)
 {
@@ -271,6 +281,7 @@ cv_wait(struct cv *cv, struct lock *lock)
     spl = splhigh();
 
     // we must own the lock
+    assert(curthread != NULL);
     assert(lock->holdingThread == curthread);
     
     lock_release(lock);
