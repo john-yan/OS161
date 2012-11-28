@@ -13,42 +13,13 @@
 #include <queue.h>
 #include <list.h>
 
-// #define REMOVEHEAD(head, tail, node) \
-// {\
-    // if (tail == head) { \
-        // node = head;\
-        // head = NULL;\
-        // tail = NULL;\
-    // } else {\
-        // node = head;\
-        // head = head->next;\
-        // assert(head != NULL);\
-        // assert(tail != NULL);\
-    // }\
-    // if (node) node->next = NULL;\
-// }
-
-// #define ADDTOTAIL(head, tail, node) \
-// {\
-    // if (tail == NULL) {\
-        // assert(head == NULL);\
-        // tail = node; \
-        // head = node;\
-    // } else {\
-        // assert(head != NULL);\
-        // tail->next = node;\
-        // tail = node;\
-    // }\
-// }
-
 /*
  *  Scheduler data
  */
 
 // Queue of runnable threads
 static struct queue *runqueue;
-static struct thread *nextToRun = NULL;
-static struct thread *tail = NULL;
+static ThreadQueue tq;
 
 /*
  * Setup function
@@ -56,12 +27,11 @@ static struct thread *tail = NULL;
 void
 scheduler_bootstrap(void)
 {
-	runqueue = q_create(32);
-	if (runqueue == NULL) {
-		panic("scheduler: Could not create run queue\n");
-	}
-    nextToRun = NULL;
-    tail = NULL;
+	// runqueue = q_create(32);
+	// if (runqueue == NULL) {
+		// panic("scheduler: Could not create run queue\n");
+	// }
+    TQInit(&tq);
 }
 
 /*
@@ -74,8 +44,9 @@ scheduler_bootstrap(void)
 int
 scheduler_preallocate(int nthreads)
 {
-	assert(curspl>0);
-	return q_preallocate(runqueue, nthreads);
+	// assert(curspl>0);
+	// return q_preallocate(runqueue, nthreads);
+    return 0;
 }
 
 /*
@@ -87,6 +58,7 @@ scheduler_preallocate(int nthreads)
 void
 scheduler_killall(void)
 {
+    panic("not used.");
 	assert(curspl>0);
 	while (!q_empty(runqueue)) {
 		struct thread *t = q_remhead(runqueue);
@@ -104,6 +76,7 @@ scheduler_killall(void)
 void
 scheduler_shutdown(void)
 {
+    panic("not used.");
 	scheduler_killall();
 
 	assert(curspl>0);
@@ -123,8 +96,8 @@ scheduler(void)
 	// meant to be called with interrupts off
 	assert(curspl>0);
 	
-	while (q_empty(runqueue)) {
-        assert(nextToRun == NULL);
+	while (TQIsEmpty(&tq)/* q_empty(runqueue) */) {
+        assert(TQIsEmpty(&tq));
 		cpu_idle();
 	}
 
@@ -132,13 +105,14 @@ scheduler(void)
 	// doing - even this deep inside thread code, the console
 	// still works. However, the amount of text printed is
 	// prohibitive.
-	// 
+	//  
 	//print_run_queue();
-	struct thread * th = q_remhead(runqueue);
-    assert(th == nextToRun);
-    assert(nextToRun != NULL);
+	struct thread * th;// = q_remhead(runqueue);
+
+    th = TQRemoveHead(&tq);
     
-    REMOVEHEAD(nextToRun, tail, th);
+    // REMOVEHEAD_HT(nextToRun, tail, th);
+    // assert(t == th);
 	return th;
 }
 
@@ -152,8 +126,8 @@ make_runnable(struct thread *t)
 	// meant to be called with interrupts off
 	assert(curspl>0);
     assert(t->next == NULL);
-    ADDTOTAIL(nextToRun, tail, t);
-	return q_addtail(runqueue, t);
+    TQAddToTail(&tq, t);
+	return 0;//q_addtail(runqueue, t);
 }
 
 /*
@@ -163,6 +137,7 @@ void
 print_run_queue(void)
 {
 	/* Turn interrupts off so the whole list prints atomically. */
+    panic("not used.");
 	int spl = splhigh();
 
 	int i,k=0;

@@ -625,28 +625,6 @@ thread_wakeup(struct queue *waitqueue)
     }
     // enable int
     splx(spl);
-
-	// This is inefficient. Feel free to improve it.
-	/* improved
-	for (i=0; i<array_getnum(sleepers); i++) {
-		struct thread *t = array_getguy(sleepers, i);
-		if (t->t_sleepaddr == addr) {
-			
-			// Remove from list
-			array_remove(sleepers, i);
-			
-			// must look at the same sleepers[i] again
-			i--;
-
-			/ *
-			 * Because we preallocate during thread_fork,
-			 * this should never fail.
-			 * /
-			result = make_runnable(t);
-			assert(result==0);
-		}
-	}
-    */
 }
 
 /*
@@ -724,3 +702,24 @@ mi_threadstart(void *data1, unsigned long data2,
 	/* Done. */
 	thread_exit();
 }
+
+void TQInit(ThreadQueue* tq){
+    tq->head = NULL;
+    tq->tail = NULL;
+}
+
+void TQAddToTail(ThreadQueue* tq, struct thread* t) {
+    ADDTOTAIL_HT(tq->head, tq->tail, t);
+}
+
+struct thread* TQRemoveHead(ThreadQueue* tq) {
+    struct thread* t;
+    REMOVEHEAD_HT(tq->head, tq->tail, t);
+    return t;
+}
+
+int TQIsEmpty(ThreadQueue* tq) {
+    return ISEMPTY(tq->head);
+}
+
+

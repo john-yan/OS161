@@ -9,6 +9,7 @@
 #include <machine/pcb.h>
 #include <mipcb.h>
 #include <queue.h>
+#include <list.h>
 
 extern struct thread *curthread;
 struct addrspace;
@@ -42,6 +43,11 @@ struct thread {
 	struct vnode *t_cwd;
     struct thread *next;
 };
+
+typedef struct {
+    struct thread* head;
+    struct thread* tail;
+} ThreadQueue;
 
 void MiPCBDestroy(struct MiPCB* mipcb);
 struct MiPCB * MiPCBGetNew(struct thread* myTh);
@@ -121,5 +127,9 @@ void mi_threadstart(void *data1, unsigned long data2,
 /* Machine dependent context switch. */
 void md_switch(struct pcb *old, struct pcb *nu);
 
+void TQInit(ThreadQueue* tq);
+void TQAddToTail(ThreadQueue* tq, struct thread* t) ;
+struct thread* TQRemoveHead(ThreadQueue* tq);
+int TQIsEmpty(ThreadQueue* tq);
 
 #endif /* _THREAD_H_ */

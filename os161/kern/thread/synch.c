@@ -124,6 +124,8 @@ lock_create(const char *name)
         kfree(lock);
         return NULL;
     }
+    
+    TQInit(&lock->tq);
 	// add stuff here as needed
 	
 	return lock;
@@ -135,7 +137,8 @@ lock_destroy(struct lock *lock)
 	assert(lock != NULL);
     assert(lock->holdingThread == NULL);
     assert(q_empty(lock->waitqueue));
-
+    assert(TQIsEmpty(&lock->tq));
+    
 	// add stuff here as needed
 	q_destroy(lock->waitqueue);
 	kfree(lock->name);
@@ -160,9 +163,9 @@ lock_acquire(struct lock *lock)
         // otherwise, someone has already held it,
         // then we go to sleep.
         while (lock->holdingThread != NULL){
+            // TQAddToTail(&lock->tq, curthread);
             thread_sleep(lock->waitqueue);
         }
-
 
         lock->holdingThread = curthread;
     }

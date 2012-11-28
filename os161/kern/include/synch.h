@@ -4,6 +4,7 @@
 
 #ifndef _SYNCH_H_
 #define _SYNCH_H_
+#include <thread.h>
 
 /*
  * Dijkstra-style semaphore.
@@ -55,6 +56,8 @@ struct lock {
 	char *name;
     volatile struct thread *holdingThread;
     struct queue *waitqueue;
+    ThreadQueue tq;
+    
 	// add what you need here
 	// (don't forget to mark things volatile as needed)
 };
