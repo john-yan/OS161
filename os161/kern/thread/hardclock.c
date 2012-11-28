@@ -8,6 +8,7 @@
  * The address of lbolt has thread_wakeup called on it once a second.
  */
 struct queue *lbolt;
+ThreadQueue lboltq;
 static int first = 1;
 
 static int lbolt_counter;
@@ -24,12 +25,12 @@ hardclock(void)
 	 */
 
 
-    if(first) lbolt = q_create(1);
+    if(first) {lbolt = q_create(1); TQInit(&lboltq);}
     first = 0;
 	lbolt_counter++;
 	if (lbolt_counter >= HZ) {
 		lbolt_counter = 0;
-		thread_wakeup(lbolt);
+		thread_wakeup(&lboltq);
 	}
 
 	thread_yield();
@@ -43,11 +44,11 @@ clocksleep(int num_secs)
 {
 	int s;
 
-    if(first) lbolt = q_create(1);
+    if(first) {lbolt = q_create(1); TQInit(&lboltq);}
     first = 0;
 	s = splhigh();
 	while (num_secs > 0) {
-		thread_sleep(lbolt);
+		thread_sleep(&lboltq);
 		num_secs--;
 	}
 	splx(s);

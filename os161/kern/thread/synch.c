@@ -33,8 +33,9 @@ sem_create(const char *namearg, int initial_count)
 		return NULL;
 	}
 
-    sem->waitqueue = q_create(1);
+    // sem->waitqueue = q_create(1);
 	sem->count = initial_count;
+    TQInit(&sem->tq);
 	return sem;
 }
 
@@ -45,7 +46,8 @@ sem_destroy(struct semaphore *sem)
 	assert(sem != NULL);
 
 	spl = splhigh();
-	assert(!thread_hassleepers(sem->waitqueue));
+	assert(!thread_hassleepers(&sem->tq));
+    assert(TQIsEmpty(&sem->tq));
 	splx(spl);
 
 	/*
@@ -57,7 +59,7 @@ sem_destroy(struct semaphore *sem)
 	 * including the kfrees in the splhigh block, so we don't.
 	 */
 
-    q_destroy(sem->waitqueue);
+    // q_destroy(sem->waitqueue);
 	kfree(sem->name);
 	kfree(sem);
 }
@@ -78,7 +80,7 @@ P(struct semaphore *sem)
 
 	spl = splhigh();
 	while (sem->count==0) {
-		thread_sleep(sem->waitqueue);
+		thread_sleep(&sem->tq);
 	}
 	assert(sem->count>0);
 	sem->count--;
@@ -93,7 +95,7 @@ V(struct semaphore *sem)
 	spl = splhigh();
 	sem->count++;
 	assert(sem->count>0);
-	thread_wakeup(sem->waitqueue);
+	thread_wakeup(&sem->tq);
 	splx(spl);
 }
 
@@ -118,12 +120,12 @@ lock_create(const char *name)
 	}
 	
     lock->holdingThread = NULL;
-    lock->waitqueue = q_create(5);
-    if (lock->waitqueue == NULL) {
-        kfree(lock->name);
-        kfree(lock);
-        return NULL;
-    }
+    // lock->waitqueue = q_create(5);
+    // if (lock->waitqueue == NULL) {
+        // kfree(lock->name);
+        // kfree(lock);
+        // return NULL;
+    // }
     
     TQInit(&lock->tq);
 	// add stuff here as needed
@@ -136,11 +138,11 @@ lock_destroy(struct lock *lock)
 {
 	assert(lock != NULL);
     assert(lock->holdingThread == NULL);
-    assert(q_empty(lock->waitqueue));
+    // assert(q_empty(lock->waitqueue));
     assert(TQIsEmpty(&lock->tq));
     
 	// add stuff here as needed
-	q_destroy(lock->waitqueue);
+	// q_destroy(lock->waitqueue);
 	kfree(lock->name);
 	kfree(lock);
 }
@@ -164,15 +166,13 @@ lock_acquire(struct lock *lock)
         // then we go to sleep.
         while (lock->holdingThread != NULL){
             // TQAddToTail(&lock->tq, curthread);
-            thread_sleep(lock->waitqueue);
+            thread_sleep(&lock->tq);
         }
 
         lock->holdingThread = curthread;
     }
     // enable interrupt
     splx(spl);
-
-	(void)lock;  // suppress warning until code gets written
 }
 
 void
@@ -189,7 +189,7 @@ lock_release(struct lock *lock)
     // first release the lock by setting holdingThread to NULL
     // then wakeup one thread (if has any) in the waitqueue.
     lock->holdingThread = NULL;
-    thread_wakeup(lock->waitqueue);
+    thread_wakeup(&lock->tq);
 
     // enable int
     splx(spl);
@@ -224,13 +224,14 @@ cv_create(const char *name)
 		return NULL;
 	}
 	
-    cv->waitqueue = q_create(5);
-    if (cv->waitqueue == NULL) {
-        kfree(cv->name);
-        kfree(cv);
-        return NULL;
-    }
+    // cv->waitqueue = q_create(5);
+    // if (cv->waitqueue == NULL) {
+        // kfree(cv->name);
+        // kfree(cv);
+        // return NULL;
+    // }
 	
+    TQInit(&cv->tq);
 	return cv;
 }
 
@@ -239,7 +240,7 @@ cv_destroy(struct cv *cv)
 {
 	assert(cv != NULL);
 
-    q_destroy(cv->waitqueue);
+    // q_destroy(cv->waitqueue);
 	kfree(cv->name);
 	kfree(cv);
 }
@@ -259,7 +260,7 @@ cv_wait(struct cv *cv, struct lock *lock)
     assert(lock->holdingThread == curthread);
     
     lock_release(lock);
-    thread_sleep(cv->waitqueue);
+    thread_sleep(&cv->tq);
     lock_acquire(lock);
     
     // enable int
@@ -276,9 +277,9 @@ cv_signal(struct cv *cv, struct lock *lock)
     // disable int
     spl = splhigh();
 
-    if (!q_empty(cv->waitqueue)) {
-        thread_wakeup(cv->waitqueue);
-    }
+    // if (!q_empty(cv->waitqueue)) {
+        thread_wakeup( &cv->tq);
+    // }
 
     // enable int
     splx(spl);
@@ -296,7 +297,7 @@ cv_broadcast(struct cv *cv, struct lock *lock)
     // disable int
     spl = splhigh();
     
-    thread_wakeupAll(cv->waitqueue);
+    thread_wakeupAll(&cv->tq);
 
     // enable int
     splx(spl);

@@ -21,7 +21,8 @@
 
 struct semaphore {
 	char *name;
-    struct queue* waitqueue;
+    // struct queue* waitqueue;
+    ThreadQueue tq;
 	volatile int count;
 };
 
@@ -55,7 +56,7 @@ void              sem_destroy(struct semaphore *);
 struct lock {
 	char *name;
     volatile struct thread *holdingThread;
-    struct queue *waitqueue;
+    // struct queue *waitqueue;
     ThreadQueue tq;
     
 	// add what you need here
@@ -97,7 +98,8 @@ void         lock_destroy(struct lock *);
 
 struct cv {
 	char *name;
-    struct queue* waitqueue;
+    // struct queue* waitqueue;
+    ThreadQueue tq;
 	// add what you need here
 	// (don't forget to mark things volatile as needed)
 };

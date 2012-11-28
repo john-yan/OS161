@@ -581,11 +581,11 @@ thread_yield(void)
  * interrupt handler.
  */
 void
-thread_sleep(struct queue* waitqueue)
+thread_sleep(ThreadQueue *tq)
 {
 	// may not sleep in an interrupt handler
 	assert(in_interrupt==0);
-	assert(waitqueue != NULL);
+	assert(tq != NULL);
     assert(curthread != NULL);
 
     // disable interrupt
@@ -593,7 +593,8 @@ thread_sleep(struct queue* waitqueue)
     spl = splhigh();
 
 	// curthread->t_sleepaddr = waitqueue;
-    q_addtail(waitqueue, curthread);
+    TQAddToTail(tq, curthread);
+    // q_addtail(waitqueue, curthread);
 	mi_switch(S_SLEEP);
 	// curthread->t_sleepaddr = NULL;
 
@@ -605,11 +606,11 @@ thread_sleep(struct queue* waitqueue)
  * Wake up one thread who is sleeping on the waitqueue.
  */
 void
-thread_wakeup(struct queue *waitqueue)
+thread_wakeup(ThreadQueue *tq)
 {
 	int result, spl;
 	
-    assert(waitqueue != NULL);
+    assert(tq != NULL);
 	// meant to be called with interrupts off
 	//assert(curspl>0);
 	
@@ -617,10 +618,13 @@ thread_wakeup(struct queue *waitqueue)
     spl = splhigh();
 
     // just wakeup the next waiting thread in the queue.
-    if (!q_empty(waitqueue)){
-        struct thread* wakeupThread = q_remhead(waitqueue);
-        assert(wakeupThread != NULL);
-        result = make_runnable(wakeupThread);
+    if (!TQIsEmpty(tq)){
+        assert(!TQIsEmpty(tq));
+        // struct thread* wakeupThread = q_remhead(waitqueue);
+        struct thread* th = TQRemoveHead(tq);
+        // assert(wakeupThread == th);
+        assert(th != NULL);
+        result = make_runnable(th);
         assert(result == 0);
     }
     // enable int
@@ -631,11 +635,11 @@ thread_wakeup(struct queue *waitqueue)
  * Wakeup all threads in the waitqueue
  */
 void
-thread_wakeupAll(struct queue *waitqueue)
+thread_wakeupAll(ThreadQueue *tq)
 {
 	int result, spl;
 	
-    assert(waitqueue != NULL);
+    assert(tq != NULL);
 	// meant to be called with interrupts off
 	//assert(curspl>0);
 	
@@ -643,10 +647,13 @@ thread_wakeupAll(struct queue *waitqueue)
     spl = splhigh();
 
     // just wakeup the next waiting thread in the queue.
-    while (!q_empty(waitqueue)){
-        struct thread* wakeupThread = q_remhead(waitqueue);
-        assert(wakeupThread != NULL);
-        result = make_runnable(wakeupThread);
+    while (!TQIsEmpty(tq)){
+        assert(!TQIsEmpty(tq));
+        // struct thread* wakeupThread = q_remhead(waitqueue);
+        struct thread* th = TQRemoveHead(tq);
+        // assert(wakeupThread == th);
+        assert(th != NULL);
+        result = make_runnable(th);
         assert(result == 0);
     }
 
@@ -659,13 +666,13 @@ thread_wakeupAll(struct queue *waitqueue)
  * ADDR. This is meant to be used only for diagnostic purposes.
  */
 int
-thread_hassleepers(struct queue *waitqueue)
+thread_hassleepers(ThreadQueue *tq)
 {
 	
 	// meant to be called with interrupts off
 	assert(curspl>0);
-	
-    return !q_empty(waitqueue);
+	// assert (q_empty(waitqueue) == TQIsEmpty(tq));
+    return !TQIsEmpty(tq);
 }
 
 /*
