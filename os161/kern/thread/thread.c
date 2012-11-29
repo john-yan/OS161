@@ -18,7 +18,7 @@
 #include <list.h>
 #include <threadqueue.h>
 
-#define MAXALLOWTHREAD 64
+#define MAXALLOWTHREAD 10
 /* States a thread can be in. */
 typedef enum {
 	S_RUN,
@@ -29,10 +29,11 @@ typedef enum {
 
 /* Global variable for the thread currently executing at any given time. */
 struct thread *curthread;
+static int isInit = 0;
 
 static struct lock thMon;
 static struct cv   thWait;
-static struct thread *totalThread[MAXALLOWTHREAD];
+static struct thread *totalThread[MAXALLOWTHREAD] = {NULL};
 static int numthreads;
 
 /* Table of sleeping threads. */
@@ -41,9 +42,20 @@ static int numthreads;
 /* List of dead threads to be disposed of. */
 // static struct array *zombies;
 static struct thread *zombieList = NULL;
-
+static struct semaphore waitForZombie;
 // new process id, increment by 1 for each new process
 static int newID = 0;
+
+static void cleaner(void* v, unsigned long l) {
+    (void)v;
+    (void)l;
+    while(1) {
+        P(&waitForZombie);
+        int spl = splhigh();
+        exorcise();
+        splx(spl);
+    }
+}
 
 // to create a new mipcb
 struct MiPCB *
@@ -51,34 +63,42 @@ MiPCBGetNew(struct thread* myTh){
     int ret = 0;
     
     struct MiPCB * newpcb = kmalloc(sizeof(struct MiPCB));
-    if(newpcb == NULL) return NULL;
+    if(newpcb == NULL) 
+        goto fail;
     newpcb->processID = newID++;
     newpcb->parentPCB = curthread ? curthread->t_miPCB : NULL;
     newpcb->myThread = myTh;
-    newpcb->children = array_create();
-    if (newpcb->children == NULL) {
-        kfree(newpcb);
-        return NULL;
-    }
-    newpcb->waitOnExit = sem_create("",0);
-    if (newpcb->waitOnExit == NULL) {
-        array_destroy(newpcb->children);
-        kfree(newpcb);
-        return NULL;
-    }
     newpcb->isExit = 0;
     newpcb->exitCode = 0;
     
-    if (curthread)
+    newpcb->children = array_create();
+    if (newpcb->children == NULL) {
+        goto fail1;
+    }
+    
+    newpcb->waitOnExit = sem_create("",0);
+    if (newpcb->waitOnExit == NULL) {
+        goto fail2;
+    }
+    
+    if (curthread){
         ret = array_add(curthread->t_miPCB->children, newpcb);
+    }
     
     if (ret) {
-        sem_destroy(newpcb->waitOnExit);
-        array_destroy(newpcb->children);
-        kfree(newpcb);
-        return NULL;
+        goto fail3;
     }
+    
     return newpcb;
+    
+fail3:
+    sem_destroy(newpcb->waitOnExit);
+fail2:
+    array_destroy(newpcb->children);
+fail1:
+    kfree(newpcb);
+fail:
+    return NULL;
 }
 
 // to destory a mipcb
@@ -101,30 +121,24 @@ thread_create(const char *name)
 {
 	struct thread *thread = kmalloc(sizeof(struct thread));
 	if (thread==NULL) {
-		return NULL;
+		goto fail;
 	}
     
     thread->t_miPCB = MiPCBGetNew(thread);
     if (thread->t_miPCB == NULL) {
-    	kfree(thread);
-		return NULL;
+    	goto fail1;
     }
     
-	// thread->t_name = kstrdup(name);
-	// if (thread->t_name==NULL) {
-        // MiPCBDestroy(thread->t_miPCB);
-		// kfree(thread);
-		// return NULL;
-	// }
-	// thread->t_sleepaddr = NULL;
 	thread->t_stack = NULL;
 	thread->t_vmspace = NULL;
 	thread->t_cwd = NULL; 
     thread->next = NULL;
-	// If you add things to the thread structure, be sure to initialize
-	// them here.
-	
 	return thread;
+    
+fail1:
+    kfree(thread);
+fail:
+    return NULL;
 }
 
 /*
@@ -139,6 +153,7 @@ thread_destroy(struct thread *thread)
 {
 	assert(thread != curthread);
 
+    
 	// If you add things to the thread structure, be sure to dispose of
 	// them here or in thread_exit.
 
@@ -154,6 +169,18 @@ thread_destroy(struct thread *thread)
     
 	// kfree(thread->t_name);
 	kfree(thread);
+    
+    assert(!lock_do_i_hold(&thMon));
+    lock_acquire(&thMon);
+    
+    assert(numthreads>0);
+    numthreads--;
+
+    cv_signal(&thWait, &thMon);
+
+    lock_release(&thMon);
+    assert(!lock_do_i_hold(&thMon));
+    
 }
 
 
@@ -168,8 +195,9 @@ exorcise(void)
     int i, result = 0;
 
     assert(curspl>0);
-
-    while(!ISEMPTY(zombieList)) {
+    assert(!ISEMPTY(zombieList));
+    
+    if(!ISEMPTY(zombieList)) {
     // for (i=0; i<array_getnum(zombies); i++) {
         struct thread *t;
         REMOVEHEAD_H(zombieList, t);
@@ -211,6 +239,10 @@ thread_panic(void)
 struct thread *
 thread_bootstrap(void)
 {
+    lock_init(&thMon);
+    cv_init(&thWait);
+    sem_init(&waitForZombie, 0);
+    
 	struct thread *me;
 	
 	/*
@@ -235,7 +267,12 @@ thread_bootstrap(void)
 
 	/* Number of threads starts at 1 */
 	numthreads = 1;
-
+    
+    isInit = 1;
+    
+    if (thread_fork("cleaner", NULL, 0, cleaner, NULL)) {
+        panic("can't create cleaner thread.\n");
+    }
 	/* Done */
 	return me;
 }
@@ -259,21 +296,33 @@ thread_fork(const char *name,
 	    void (*func)(void *, unsigned long),
 	    struct thread **ret)
 {
+    if (isInit) {
+        //exorcise();
+        assert(!lock_do_i_hold(&thMon));
+        lock_acquire(&thMon);
+        assert(lock_do_i_hold(&thMon));
+        while (numthreads >= MAXALLOWTHREAD) {
+            // kprintf("fork blocked.\n");
+            assert(lock_do_i_hold(&thMon));
+            cv_wait(&thWait, &thMon);
+            assert(lock_do_i_hold(&thMon));
+        }
+    }
 	struct thread *newguy;
 	int s, result;
 
 	/* Allocate a thread */
 	newguy = thread_create(name);
 	if (newguy==NULL) {
-		return ENOMEM;
+		result = ENOMEM;
+        goto failx;
 	}
 
 	/* Allocate a stack */
 	newguy->t_stack = kmalloc(STACK_SIZE);
 	if (newguy->t_stack==NULL) {
-		// kfree(newguy->t_name);
-		kfree(newguy);
-		return ENOMEM;
+		result = ENOMEM;
+        goto fail;
 	}
 
 	/* stick a magic number on the bottom end of the stack */
@@ -321,17 +370,24 @@ thread_fork(const char *name,
 		*ret = newguy;
 	}
 
+    assert(lock_do_i_hold(&thMon));
+    lock_release(&thMon);
+    assert(!lock_do_i_hold(&thMon));
 	return 0;
 
- fail:
-	splx(s);
+fail1:
+	// splx(s);
 	if (newguy->t_cwd != NULL) {
 		VOP_DECREF(newguy->t_cwd);
 	}
 	kfree(newguy->t_stack);
 	// kfree(newguy->t_name);
+fail:
 	kfree(newguy);
-
+failx:
+    assert(lock_do_i_hold(&thMon));
+    lock_release(&thMon);
+    assert(!lock_do_i_hold(&thMon));
 	return result;
 }
 
@@ -452,6 +508,7 @@ mi_switch(threadstate_t nextstate)
 		return;
 	}
 	cur = curthread;
+    assert((int)cur < 0);
 	curthread = NULL;
 
 	/*
@@ -473,6 +530,7 @@ mi_switch(threadstate_t nextstate)
 		assert(nextstate==S_ZOMB);
 		// result = array_add(zombies, cur);
         ADDTOHEAD_H(zombieList, cur);
+        V(&waitForZombie);
 	}
 	assert(result==0);
 
@@ -481,7 +539,7 @@ mi_switch(threadstate_t nextstate)
 	 */
 
 	next = scheduler();
-
+    assert((int)next < 0);
 	/* update curthread */
 	curthread = next;
 	
@@ -498,8 +556,6 @@ mi_switch(threadstate_t nextstate)
 	 *
 	 * exorcise is skippable; as_activate is done in mi_threadstart.
 	 */
-
-	exorcise();
 
 	if (curthread->t_vmspace) {
 		as_activate(curthread->t_vmspace);
@@ -572,9 +628,10 @@ thread_exit(void)
     }
     
     curthread->t_miPCB = NULL;
-	assert(numthreads>0);
-	numthreads--;
+	// assert(numthreads>0);
+	// numthreads--;
     assert(curthread->next == NULL);
+    assert(!lock_do_i_hold(&thMon));
 	mi_switch(S_ZOMB);
 
 	panic("Thread came back from the dead!\n");
@@ -613,12 +670,15 @@ thread_sleep(ThreadQueue *tq)
 	assert(in_interrupt==0);
 	assert(tq != NULL);
     assert(curthread != NULL);
-
+    assert(curthread->next == NULL);
+    assert((int)curthread < 0);
+    
     // disable interrupt
     int spl;
     spl = splhigh();
 
 	// curthread->t_sleepaddr = waitqueue;
+    assert(curthread != NULL);
     TQAddToTail(tq, curthread);
     // q_addtail(waitqueue, curthread);
 	mi_switch(S_SLEEP);
@@ -650,6 +710,7 @@ thread_wakeup(ThreadQueue *tq)
         struct thread* th = TQRemoveHead(tq);
         // assert(wakeupThread == th);
         assert(th != NULL);
+        assert((int)th < 0);
         result = make_runnable(th);
         assert(result == 0);
     }
@@ -679,6 +740,7 @@ thread_wakeupAll(ThreadQueue *tq)
         struct thread* th = TQRemoveHead(tq);
         // assert(wakeupThread == th);
         assert(th != NULL);
+        assert((int)th < 0);
         result = make_runnable(th);
         assert(result == 0);
     }
@@ -742,12 +804,15 @@ void TQInit(ThreadQueue* tq){
 }
 
 void TQAddToTail(ThreadQueue* tq, struct thread* t) {
+    assert((int)t < 0);
     ADDTOTAIL_HT(tq->head, tq->tail, t);
 }
 
 struct thread* TQRemoveHead(ThreadQueue* tq) {
     struct thread* t;
     REMOVEHEAD_HT(tq->head, tq->tail, t);
+    assert(t != NULL);
+    assert((int)t < 0);
     return t;
 }
 

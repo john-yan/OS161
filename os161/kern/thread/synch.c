@@ -188,8 +188,10 @@ lock_acquire(struct lock *lock)
         }
 
         lock->holdingThread = curthread;
+    } else {
+        panic("I already hold the lock");
     }
-    assert(lock->holdingThread = curthread);
+    assert(lock->holdingThread == curthread);
     // enable interrupt
     splx(spl);
 }
@@ -254,7 +256,7 @@ cv_create(const char *name)
 	return cv;
 }
 
-void       cv_init(struct cv* cv)
+void cv_init(struct cv* cv)
 {
     TQInit(&cv->tq);
 }
