@@ -684,7 +684,8 @@ thread_sleep(ThreadQueue *tq)
     TQAddToTail(tq, curthread);
     // q_addtail(waitqueue, curthread);
     if (curthread->t_vmspace) {
-        as_release(curthread->t_vmspace);
+        if (lock_do_i_hold(curthread->t_vmspace->lk));
+            as_release(curthread->t_vmspace);
     }
 	mi_switch(S_SLEEP);
     if (curthread->t_vmspace) {
