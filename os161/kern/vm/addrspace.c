@@ -39,17 +39,45 @@ static int
 LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr);
 static int IsOnStackRegion(size_t stacksize, vaddr_t vaddr);
 static int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr);
-static struct lock* vmlock = NULL;
+
+static struct lock vmlock;
+static int noProgress = 0;
+static struct vnode *disk = 0;
+
+static void swapper(void *o, unsigned long l)
+{
+    (void)o;
+    (void)l;
+    paddr_t userPage;
+    int spl;
+    int pageInDisk = 0;
+    int result = 0;
+    
+    while(1) {
+        spl = splhigh();
+        userPage = 0; // get a user page;
+        // lock the page
+        splx(spl);
+        
+        // write the page to disk
+        
+        spl = splhigh();
+        // unlock the page
+        
+        splx(spl);
+    }
+}
 
 void
 vm_bootstrap(void)
 {
-    assert(vmlock == NULL);
-    vmlock = lock_create("vmlock");
-	if (vmlock == NULL) {
-        panic("vm bootstrap failed: Run out of memory");
-    }
+    int result;
     
+    // result = vfs_open("DISK1.img", O_ACCMODE, &disk);
+    // if (result) {
+        // panic("Can't Open swap device.");
+    // }
+    lock_init(&vmlock);
 }
 
 static
@@ -341,6 +369,24 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 	
 	*ret = new;
 	return 0;
+}
+
+int as_hold(struct addrspace *as)
+{
+    assert(as != NULL);
+    assert(as->lk != NULL);
+    
+    lock_acquire(as->lk);
+    return 0;
+}
+
+int as_release(struct addrspace *as)
+{
+    assert(as != NULL);
+    assert(as->lk != NULL);
+    
+    lock_release(as->lk);
+    return 0;
 }
 
 static void CopyOnePage(PageTableL1 *dest, PageTableL1 *src, vaddr_t vaddr)

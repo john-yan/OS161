@@ -509,6 +509,7 @@ mi_switch(threadstate_t nextstate)
 	}
 	cur = curthread;
     assert((int)cur < 0);
+    
 	curthread = NULL;
 
 	/*
@@ -595,6 +596,7 @@ thread_exit(void)
 		 */
 		struct addrspace *as = curthread->t_vmspace;
 		curthread->t_vmspace = NULL;
+        as_release(as);
 		as_destroy(as);
 	}
 
@@ -681,7 +683,13 @@ thread_sleep(ThreadQueue *tq)
     assert(curthread != NULL);
     TQAddToTail(tq, curthread);
     // q_addtail(waitqueue, curthread);
+    if (curthread->t_vmspace) {
+        as_release(curthread->t_vmspace);
+    }
 	mi_switch(S_SLEEP);
+    if (curthread->t_vmspace) {
+        as_hold(curthread->t_vmspace);
+    }
 	// curthread->t_sleepaddr = NULL;
 
     // enable int
@@ -774,6 +782,7 @@ mi_threadstart(void *data1, unsigned long data2,
 {
 	/* If we have an address space, activate it */
 	if (curthread->t_vmspace) {
+        as_hold(curthread->t_vmspace);
 		as_activate(curthread->t_vmspace);
 	}
 

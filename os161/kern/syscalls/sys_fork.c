@@ -36,13 +36,13 @@ int sys_fork(struct trapframe *tf, int* err)
     // create a new thread
     struct thread *newth;
     ret = thread_fork("" /* thread name */,
-			newtf /* thread arg */, 1 /* thread arg */,
+			newtf /* thread arg */, (unsigned long)t_vmspace /* thread arg */,
 			md_forkentry, &newth);
     if (ret) {
         *err = ENOMEM;
         goto fail2;
     }
-    newth->t_vmspace = t_vmspace;
+    newth->t_vmspace = NULL;
     
     int newid = newth->t_miPCB->processID;
     splx(spl);
@@ -60,14 +60,19 @@ fail:
 }
 
 static
-void md_forkentry(struct trapframe *tf, unsigned long unused)
+void md_forkentry(struct trapframe *tf, unsigned long vmspace)
 {
     // disable interrupt
+    struct addrspace *t_vmspace = (struct addrspace*)vmspace;
     splhigh();
     
-    if (curthread->t_vmspace == NULL) {
+    if (t_vmspace == NULL) {
         thread_exit();
     }
+    assert(curthread->t_vmspace == NULL);
+    curthread->t_vmspace = t_vmspace;
+    
+    
     // copy the trapframe to our own stack and free it
     struct trapframe mytf;
     memmove(&mytf, tf, sizeof(mytf));
@@ -81,6 +86,7 @@ void md_forkentry(struct trapframe *tf, unsigned long unused)
     mytf.tf_epc += 4;
     
 	/* Activate it. */
+    as_hold(curthread->t_vmspace);
 	as_activate(curthread->t_vmspace);
     
     // kprintf("sw to user mode.\n");

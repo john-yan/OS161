@@ -3,6 +3,7 @@
 
 #include <vm.h>
 #include <elf.h>
+#include <synch.h>
 // #include "opt-dumbvm.h"
 
 struct vnode;
@@ -43,7 +44,7 @@ typedef struct {
 #define RG_W 2
 
 struct addrspace {
-    struct lock* lk;
+    struct lock *lk;
     struct vnode *v;
 	Elf_Phdr elf_ph[2];
     Region region[2];
@@ -98,7 +99,8 @@ int               as_define_eh(struct addrspace *as, struct vnode *v, Elf_Ehdr* 
 int		  as_prepare_load(struct addrspace *as);
 int		  as_complete_load(struct addrspace *as);
 int               as_define_stack(struct addrspace *as, vaddr_t *initstackptr);
-
+int as_hold(struct addrspace *as);
+int as_release(struct addrspace *as);
 /*
  * Functions in loadelf.c
  *    load_elf - load an ELF user program executable into the current

@@ -114,7 +114,7 @@ void FreeNPages(u_int32_t paddr)
     // kprintf("free %d pages(%d).\n", nPages, pages -= nPages);
 }
 
-void CoreMapReport()
+int CoreMapReport()
 {
     unsigned i = 0;
     unsigned numOfFreePages = 0;
@@ -126,8 +126,9 @@ void CoreMapReport()
         else
             numOfFreePages++;
     }
-    kprintf("number of free pages = %d\n", numOfFreePages);
-    kprintf("number of allocated pages = %d\n", numOfAllocPages);
+    return numOfFreePages;
+    // kprintf("number of free pages = %d\n", numOfFreePages);
+    // kprintf("number of allocated pages = %d\n", numOfAllocPages);
 }
 
 

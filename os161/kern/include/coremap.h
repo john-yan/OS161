@@ -38,7 +38,7 @@ void CoreMapBootsTrap();
 u_int32_t GetNFreePage(u_int32_t nPages);
 void AllocateNPages(u_int32_t paddr, u_int32_t isKernelPage, u_int32_t nPages);
 void FreeNPages(u_int32_t paddr);
-void CoreMapReport();
+int CoreMapReport();
 
 #endif
 
