@@ -73,10 +73,10 @@ vm_bootstrap(void)
 {
     int result;
     
-    // result = vfs_open("DISK1.img", O_ACCMODE, &disk);
-    // if (result) {
-        // panic("Can't Open swap device.");
-    // }
+    result = vfs_open("lhd0raw:", O_RDWR, &disk);
+    if (result) {
+        panic("Can't Open swap device.");
+    }
     lock_init(&vmlock);
 }
 
