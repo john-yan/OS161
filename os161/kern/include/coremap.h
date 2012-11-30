@@ -15,6 +15,7 @@ typedef struct _PageEntry{
     u_int32_t  unused: 10;
     // /* other info */
     struct addrspace* ref;
+    // PageTableEntry *pte;
     
 } PageEntry;
 
@@ -23,6 +24,8 @@ u_int32_t GetNFreePage(u_int32_t nPages);
 void AllocateNPages(struct addrspace* as, u_int32_t paddr, u_int32_t isKernelPage, u_int32_t nPages);
 void FreeNPages(u_int32_t paddr);
 int CoreMapReport();
+int CoreMapGetPageToSwap(vaddr_t *kvaddr);
+// int CoreMapSetPageInfo(struct addrspace *as, PageTableEntry * pte, paddr_t paddr);
 
 #endif
 

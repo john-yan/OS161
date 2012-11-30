@@ -44,7 +44,8 @@ static struct lock vmlock;
 static int noProgress = 0;
 static struct vnode *disk = NULL;
 static struct cv needToEvicPage;
-static struct semaphore pagesToEvic;
+static struct cv needMorePages;
+// static struct semaphore pagesToEvic;
 
 static void swapper(void *o, unsigned long l)
 {
@@ -54,20 +55,39 @@ static void swapper(void *o, unsigned long l)
     int spl;
     int pageInDisk = 0;
     int result = 0;
+    int nFreePages = 0;
     
-    while(0) {
+    do {
+        lock_acquire(&vmlock);
+        
         spl = splhigh();
-        userPage = 0; // get a user page;
-        // lock the page
+        nFreePages = CoreMapReport();
         splx(spl);
+        
+        while (nFreePages > 10) {
+            cv_wait(&needToEvicPage, &vmlock);
+            spl = splhigh();
+            nFreePages = CoreMapReport();
+            splx(spl);
+        }
+        
+        kprintf("put some pages to disk.\n");
+        // lock the pagetable and coremap entry
+        lock_release(&vmlock);
+        clocksleep(1); // put some pages to disk
+        cv_signal(&needMorePages, &vmlock);
+        // spl = splhigh();
+        // userPage = 0; // get a user page;
+        // lock the page
+        // splx(spl);
         
         // write the page to disk
         
-        spl = splhigh();
+        // spl = splhigh();
         // unlock the page
         
-        splx(spl);
-    }
+        // splx(spl);
+    } while (1);
 }
 
 void
@@ -77,7 +97,8 @@ vm_bootstrap(void)
     struct uio ku;
     lock_init(&vmlock);
     cv_init(&needToEvicPage);
-    sem_init(&pagesToEvic, 0);
+    // sem_init(&pagesToEvic, 0);
+    cv_init(&needMorePages);
     // char *p = alloc_kpages(1);
     // bzero(p, PAGE_SIZE);
     // strcpy(p, "hello world.");
@@ -117,18 +138,28 @@ paddr_t
 getppages(struct addrspace *as)
 {
 	int spl;
-	paddr_t addr;
+	paddr_t addr = 0;
     const int isKernelPage = 0;
     const int nPageToAllocate = 1;
     assert(as != NULL);
-	spl = splhigh();
     
-	addr = GetNFreePage(1);
-    // kprintf("getpages.\n");
-	if (addr) 
-        AllocateNPages(as, addr, isKernelPage, nPageToAllocate);
-    // CoreMapReport();
-	splx(spl);
+    while (addr == 0) {
+        lock_acquire(&vmlock);
+        spl = splhigh();
+        
+        addr = GetNFreePage(1);
+        // kprintf("getpages.\n");
+        if (addr) 
+            AllocateNPages(as, addr, isKernelPage, nPageToAllocate);
+        // CoreMapReport();
+        splx(spl);
+        if (addr == 0) {
+            cv_signal(&needToEvicPage, &vmlock);
+            cv_wait(&needMorePages, &vmlock);
+            kprintf("I hope to have more pages.\n");
+        }
+        lock_release(&vmlock);
+    }
 	return addr;
 }
 
