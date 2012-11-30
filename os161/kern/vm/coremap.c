@@ -2,16 +2,8 @@
 #include <types.h>
 #include <lib.h>
 #include <vm.h>
-
-typedef struct _PageEntry{
-    u_int32_t  isAllocated: 1;
-    u_int32_t  isKernelPage: 1;
-    u_int32_t  nContinousPages: 20;
-    u_int32_t  unused: 10;
-    // /* other info */
-    struct addrspace* ref;
-    
-} PageEntry;
+#include <addrspace.h>
+#include <machine/spl.h>
 
 static struct {
     u_int32_t  totalNumberOfPages;
@@ -71,6 +63,7 @@ u_int32_t GetNFreePage(u_int32_t nPages)
 {
     PageEntry* peStart = FIRSTENTRY;
     PageEntry* peEnd;
+    assert(curspl > 0);
     while (peStart < LASTENTRY) {
         while (peStart < LASTENTRY && !ISPAGEFREE(peStart)) 
             peStart++;
@@ -86,10 +79,15 @@ u_int32_t GetNFreePage(u_int32_t nPages)
     return 0;
 }
 
-void AllocateNPages(u_int32_t paddr, u_int32_t isKernelPage, u_int32_t nPages)
+void AllocateNPages(struct addrspace *as, u_int32_t paddr, u_int32_t isKernelPage, u_int32_t nPages)
 {
     assert(((u_int32_t)paddr & 0xfffff000) == paddr);
-    
+    if (isKernelPage == 0) {
+        assert(as != NULL);
+    } else {
+        assert(as == NULL);
+    }
+    assert(curspl > 0);
     unsigned int i = 0;
     PageEntry* pe = GETPAGEENTRY(paddr);
     pe->nContinousPages = nPages;
@@ -97,12 +95,14 @@ void AllocateNPages(u_int32_t paddr, u_int32_t isKernelPage, u_int32_t nPages)
         assert(pe[i].isAllocated == 0);
         pe[i].isAllocated = 1;
         pe[i].isKernelPage = isKernelPage;
+        pe[i].ref = as;
     }
     // kprintf("allocate %d pages(%d).\n",nPages, pages += nPages);
 }
 
 void FreeNPages(u_int32_t paddr) 
 {
+    assert(curspl > 0);
     assert(((u_int32_t)paddr & 0xfffff000) == paddr);
     PageEntry* pe = GETPAGEENTRY(paddr);
     int i = 0, nPages = pe->nContinousPages;
@@ -120,6 +120,8 @@ int CoreMapReport()
     unsigned numOfFreePages = 0;
     unsigned numOfAllocPages = 0;
     PageEntry* pe = FIRSTENTRY;
+    assert(curspl > 0);
+    
     for (i = 0; i < coremap.totalNumberOfPages; i++) {
         if (pe[i].isAllocated == 1)
             numOfAllocPages++;
@@ -131,8 +133,23 @@ int CoreMapReport()
     // kprintf("number of allocated pages = %d\n", numOfAllocPages);
 }
 
-
-
+int CoreMapGetPageToSwap(vaddr_t *vaddr)
+{
+    unsigned i = 0;
+    PageEntry* pe = FIRSTENTRY;
+    paddr_t paddr;
+    assert(curspl > 0);
+    assert(vaddr != NULL);
+    
+    for (i = 0; i < coremap.totalNumberOfPages; i++) {
+        if (pe[i].isAllocated == 1 && pe[i].isKernelPage == 0) {
+            paddr = GETPADDR(&pe[i]);
+            *vaddr = PADDR_TO_KVADDR(paddr);
+            return 0;
+        }
+    }
+    return -1;
+}
 
 
 

@@ -31,7 +31,7 @@ static void CopyNPages(PageTableL1 *dest, PageTableL1 *src, vaddr_t vaddr, size_
 static int AddOneMapping(PageTableL1 *pageTable, vaddr_t vaddr, paddr_t paddr);
 static int SetPageValid(PageTableL1 *pageTable, vaddr_t vaddr, unsigned isValid);
 static int IsPageValid(PageTableL1 *pageTable, vaddr_t vaddr);
-static int AddNPagesOnVaddr(PageTableL1 *pageTable, vaddr_t vaddr, size_t npages);
+static int AddNPagesOnVaddr(struct addrspace *as, vaddr_t vaddr, size_t npages);
 static void ReleasePageTable(PageTableL1* pageTable);
 static int GetPhysicalFrame(PageTableL1 *ptl1, vaddr_t vaddr, paddr_t *paddr);
 static int UpdateTLB(vaddr_t vaddr, paddr_t paddr, unsigned permission);
@@ -42,7 +42,9 @@ static int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr);
 
 static struct lock vmlock;
 static int noProgress = 0;
-static struct vnode *disk = 0;
+static struct vnode *disk = NULL;
+static struct cv needToEvicPage;
+static struct semaphore pagesToEvic;
 
 static void swapper(void *o, unsigned long l)
 {
@@ -73,53 +75,58 @@ vm_bootstrap(void)
 {
     int result;
     struct uio ku;
-    char *p = alloc_kpages(1);
-    bzero(p, PAGE_SIZE);
-    strcpy(p, "hello world.");
+    lock_init(&vmlock);
+    cv_init(&needToEvicPage);
+    sem_init(&pagesToEvic, 0);
+    // char *p = alloc_kpages(1);
+    // bzero(p, PAGE_SIZE);
+    // strcpy(p, "hello world.");
     
-    result = vfs_open("lhd0raw:", O_RDWR, &disk);
-    if (result) {
-        panic("Can't Open swap device.");
-    }
+    // result = vfs_open("lhd0raw:", O_RDWR, &disk);
+    // if (result) {
+        // panic("Can't Open swap device.");
+    // }
     
-    mk_kuio(&ku, p , PAGE_SIZE, 0, UIO_WRITE);
-    result = VOP_WRITE(disk, &ku);
-    if (result) {
-        panic(strerror(result));
-    }
+    // mk_kuio(&ku, p , PAGE_SIZE, 0, UIO_WRITE);
+    // result = VOP_WRITE(disk, &ku);
+    // if (result) {
+        // panic(strerror(result));
+    // }
     
-    bzero(p, PAGE_SIZE);
+    // bzero(p, PAGE_SIZE);
     
-    mk_kuio(&ku, p , PAGE_SIZE, 0, UIO_READ);
-    result = VOP_READ(disk, &ku);
-    if (result) {
-        panic(strerror(result));
-    }
+    // mk_kuio(&ku, p , PAGE_SIZE, 0, UIO_READ);
+    // result = VOP_READ(disk, &ku);
+    // if (result) {
+        // panic(strerror(result));
+    // }
     
-    if (strcmp(p, "hello world.")) {
-        panic("not match.");
-    }
+    // if (strcmp(p, "hello world.")) {
+        // panic("not match.");
+    // }
     
     result = thread_fork("swapper", NULL, 0, swapper, NULL);
     if (result) {
         panic("Can't create swapper thread.");
     }
-    lock_init(&vmlock);
+    
 }
 
 static
 paddr_t
-getppages()
+getppages(struct addrspace *as)
 {
 	int spl;
 	paddr_t addr;
-
+    const int isKernelPage = 0;
+    const int nPageToAllocate = 1;
+    assert(as != NULL);
 	spl = splhigh();
     
 	addr = GetNFreePage(1);
     // kprintf("getpages.\n");
 	if (addr) 
-        AllocateNPages(addr, 0, 1);
+        AllocateNPages(as, addr, isKernelPage, nPageToAllocate);
     // CoreMapReport();
 	splx(spl);
 	return addr;
@@ -131,13 +138,13 @@ alloc_kpages(int npages)
 {
 	int spl;
 	paddr_t addr;
-
+    const int isKernelPage = 1;
 	spl = splhigh();
     
 	addr = GetNFreePage(npages);
     // kprintf("getpages.\n");
 	if (addr) 
-        AllocateNPages(addr, 1, npages);
+        AllocateNPages(NULL, addr, isKernelPage, npages);
     // CoreMapReport();
 	splx(spl);
 	return addr ? PADDR_TO_KVADDR(addr) : 0;
@@ -384,7 +391,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
     new->v = old->v;
     VOP_INCREF(new->v);
     
-	if (AddNPagesOnVaddr(&new->pageTable, 
+	if (AddNPagesOnVaddr(new, 
             USERTOP - old->stacksize * PAGE_SIZE,
             old->stacksize)) {
 		as_destroy(new);
@@ -494,7 +501,7 @@ static int SetPageValid(PageTableL1 *pageTable, vaddr_t vaddr, unsigned isValid)
 
 static int IsPageValid(PageTableL1 *pageTable, vaddr_t vaddr)
 {
-        assert((vaddr & 0xfffff000) == vaddr);
+    assert((vaddr & 0xfffff000) == vaddr);
     
     vaddr = (unsigned)vaddr >> 12;
     u_int32_t pageTableL1Index = vaddr >> 10;
@@ -508,12 +515,13 @@ static int IsPageValid(PageTableL1 *pageTable, vaddr_t vaddr)
     return pte->valid;
 }
 
-static int AddNPagesOnVaddr(PageTableL1 *pageTable, vaddr_t vaddr, size_t npages)
+static int AddNPagesOnVaddr(struct addrspace *as, vaddr_t vaddr, size_t npages)
 {
+    PageTableL1 *pageTable = &as->pageTable;
     paddr_t paddr;
     unsigned i;
     for (i = 0; i < npages; i++) {
-        paddr = getppages();
+        paddr = getppages(as);
         if (paddr == 0)
             return ENOMEM;
         if (AddOneMapping(pageTable, vaddr + i * PAGE_SIZE, paddr)) {
@@ -606,7 +614,7 @@ LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     assert(v != NULL);
     
     spl = splhigh();
-    paddr = getppages();
+    paddr = getppages(as);
     if (paddr == 0)
         goto fail1;
     if (AddOneMapping(&as->pageTable, vaddr, paddr)) {
@@ -681,7 +689,7 @@ static int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     int spl;
     
     spl = splhigh();
-    paddr = getppages();
+    paddr = getppages(as);
     if (paddr == 0)
         goto fail1;
     if (AddOneMapping(&as->pageTable, vaddr, paddr)) {
