@@ -53,7 +53,7 @@ static void swapper(void *o, unsigned long l)
     int pageInDisk = 0;
     int result = 0;
     
-    while(1) {
+    while(0) {
         spl = splhigh();
         userPage = 0; // get a user page;
         // lock the page
@@ -72,10 +72,37 @@ void
 vm_bootstrap(void)
 {
     int result;
+    struct uio ku;
+    char *p = alloc_kpages(1);
+    bzero(p, PAGE_SIZE);
+    strcpy(p, "hello world.");
     
     result = vfs_open("lhd0raw:", O_RDWR, &disk);
     if (result) {
         panic("Can't Open swap device.");
+    }
+    
+    mk_kuio(&ku, p , PAGE_SIZE, 0, UIO_WRITE);
+    result = VOP_WRITE(disk, &ku);
+    if (result) {
+        panic(strerror(result));
+    }
+    
+    bzero(p, PAGE_SIZE);
+    
+    mk_kuio(&ku, p , PAGE_SIZE, 0, UIO_READ);
+    result = VOP_READ(disk, &ku);
+    if (result) {
+        panic(strerror(result));
+    }
+    
+    if (strcmp(p, "hello world.")) {
+        panic("not match.");
+    }
+    
+    result = thread_fork("swapper", NULL, 0, swapper, NULL);
+    if (result) {
+        panic("Can't create swapper thread.");
     }
     lock_init(&vmlock);
 }
