@@ -133,22 +133,23 @@ int CoreMapReport()
     // kprintf("number of allocated pages = %d\n", numOfAllocPages);
 }
 
-int CoreMapGetPageToSwap(vaddr_t *kvaddr)
+int CoreMapGetPageToSwap(struct addrspace **as, 
+            struct _PageTableEntry **pte)
 {
-    unsigned i = 0;
-    PageEntry* pe = FIRSTENTRY;
-    paddr_t paddr;
-    assert(curspl > 0);
-    assert(kvaddr != NULL);
+    // unsigned i = 0;
+    // PageEntry* pe = FIRSTENTRY;
+    // paddr_t paddr;
+    // assert(curspl > 0);
+    // assert(kvaddr != NULL);
     
-    for (i = 0; i < coremap.totalNumberOfPages; i++) {
-        if (pe[i].isAllocated == 1 && pe[i].isKernelPage == 0) {
-            paddr = GETPADDR(&pe[i]);
-            *kvaddr = PADDR_TO_KVADDR(paddr);
-            return 0;
-        }
-    }
-    return -1;
+    // for (i = 0; i < coremap.totalNumberOfPages; i++) {
+        // if (pe[i].isAllocated == 1 && pe[i].isKernelPage == 0) {
+            // paddr = GETPADDR(&pe[i]);
+            // *kvaddr = PADDR_TO_KVADDR(paddr);
+            // return 0;
+        // }
+    // }
+    // return -1;
 }
 
 int CoreMapSetPageInfo(struct addrspace *as, PageTableEntry * pte, paddr_t paddr)

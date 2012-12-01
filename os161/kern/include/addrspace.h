@@ -15,7 +15,7 @@ struct vnode;
  * You write this.
  */
 
-typedef struct {
+typedef struct _PageTableEntry{
     paddr_t    frameAddr: 20;
     u_int32_t global: 1; // ignore pid bits if set
     u_int32_t unused: 6;
