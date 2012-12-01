@@ -86,7 +86,7 @@ void md_forkentry(struct trapframe *tf, unsigned long vmspace)
     mytf.tf_epc += 4;
     
 	/* Activate it. */
-    as_hold(curthread->t_vmspace);
+    // as_hold(curthread->t_vmspace);
 	as_activate(curthread->t_vmspace);
     
     // kprintf("sw to user mode.\n");

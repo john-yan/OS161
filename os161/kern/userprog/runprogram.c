@@ -46,7 +46,7 @@ runprogram(char *progname, int argc, char* argv[])
 	}
 
 	/* Activate it. */
-    as_hold(curthread->t_vmspace);
+    // as_hold(curthread->t_vmspace);
 	as_activate(curthread->t_vmspace);
 
 	/* Load the executable. */

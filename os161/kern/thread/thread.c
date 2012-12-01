@@ -297,7 +297,6 @@ thread_fork(const char *name,
 	    struct thread **ret)
 {
     if (isInit) {
-        //exorcise();
         assert(!lock_do_i_hold(&thMon));
         lock_acquire(&thMon);
         assert(lock_do_i_hold(&thMon));
@@ -596,7 +595,7 @@ thread_exit(void)
 		 */
 		struct addrspace *as = curthread->t_vmspace;
 		curthread->t_vmspace = NULL;
-        as_release(as);
+        // as_release(as);
 		as_destroy(as);
 	}
 
@@ -683,14 +682,14 @@ thread_sleep(ThreadQueue *tq)
     assert(curthread != NULL);
     TQAddToTail(tq, curthread);
     // q_addtail(waitqueue, curthread);
-    if (curthread->t_vmspace) {
-        if (lock_do_i_hold(curthread->t_vmspace->lk));
-            as_release(curthread->t_vmspace);
-    }
+    // if (curthread->t_vmspace) {
+        // if (lock_do_i_hold(curthread->t_vmspace->lk));
+            // as_release(curthread->t_vmspace);
+    // }
 	mi_switch(S_SLEEP);
-    if (curthread->t_vmspace) {
-        as_hold(curthread->t_vmspace);
-    }
+    // if (curthread->t_vmspace) {
+        // as_hold(curthread->t_vmspace);
+    // }
 	// curthread->t_sleepaddr = NULL;
 
     // enable int
@@ -783,7 +782,7 @@ mi_threadstart(void *data1, unsigned long data2,
 {
 	/* If we have an address space, activate it */
 	if (curthread->t_vmspace) {
-        as_hold(curthread->t_vmspace);
+        // as_hold(curthread->t_vmspace);
 		as_activate(curthread->t_vmspace);
 	}
 

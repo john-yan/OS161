@@ -37,7 +37,7 @@ static void ReleasePageTable(PageTableL1* pageTable);
 static int GetPhysicalFrame(PageTableL1 *ptl1, vaddr_t vaddr, paddr_t *paddr, unsigned *permission);
 static int UpdateTLB(vaddr_t vaddr, paddr_t paddr, unsigned permission);
 static int
-LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr);
+LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr, unsigned *permission);
 static int IsOnStackRegion(size_t stacksize, vaddr_t vaddr);
 static int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr);
 
@@ -59,6 +59,8 @@ static void swapper(void *o, unsigned long l)
     int result = 0;
     int nFreePages = 0;
     int i;
+    struct addrspace* as;
+    PageTableEntry *pte;
     
     do {
         lock_acquire(&vmlock);
@@ -77,9 +79,7 @@ static void swapper(void *o, unsigned long l)
         kprintf("put some pages to disk.\n");
         // lock the pagetable and coremap entry
         lock_release(&vmlock);
-        // clocksleep(1); // put some pages to disk
-        for (i = 0; i < 10000; i++)
-            thread_yield(); // some delay
+        clocksleep(1); // put some pages to disk
         cv_broadcast(&needMorePages, &vmlock);
         // spl = splhigh();
         // userPage = 0; // get a user page;
@@ -247,11 +247,13 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		return EFAULT;
 	}
 
-    result = GetPhysicalFrame(&as->pageTable, faultaddress, &paddr, NULL);
+    // assert(lock_do_i_hold(as->lk));
+    result = GetPhysicalFrame(&as->pageTable, faultaddress, &paddr, &permission);
     if (result) {
         // decide which region
         if (IsOnStackRegion(as->stacksize, faultaddress)) {
             result = IncreaseStack(as, faultaddress, &paddr);
+            permission = TLBLO_DIRTY | TLBLO_VALID;
         } else {
             for (i = 0; i < 2; i++) {
                 vaddr_t start = as->region[i].regionBase << 12;
@@ -260,7 +262,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                     break;
             }
             if (i < 2) {
-                result = LoadPage(as, faultaddress, &paddr);
+                result = LoadPage(as, faultaddress, &paddr, &permission);
             }
         }
     }
@@ -667,7 +669,11 @@ static int GetPhysicalFrame(PageTableL1 *ptl1, vaddr_t vaddr, paddr_t *paddr, un
         return -1;
     }
     *paddr = pte->frameAddr << 12;
-    if (permission) *permission = *((int*)pte) & 0x00000fff;
+    if (permission) {
+        *permission = TLBLO_VALID;
+        if (pte->writable) 
+            *permission |= TLBLO_DIRTY;
+    }
     return 0;
 }
 
@@ -700,7 +706,7 @@ static int UpdateTLB(vaddr_t vaddr, paddr_t paddr, unsigned permission)
 }
 
 static int
-LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
+LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr, unsigned *permission)
 {
     assert((vaddr & 0xfffff000) == vaddr);
     
@@ -758,6 +764,11 @@ LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
             }
             result = SetPageWritable(&as->pageTable, vaddr, (as->elf_ph[i].p_flags & PF_W) != 0);
             assert(result == 0);
+            if (permission) {
+                *permission = TLBLO_VALID;
+                if (as->elf_ph[i].p_flags & PF_W) 
+                    *permission |= TLBLO_DIRTY;
+            }
         }
     }
     *_paddr = paddr;
