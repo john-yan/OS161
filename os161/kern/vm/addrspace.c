@@ -28,7 +28,7 @@
 
 static void CopyOnePage(PageTableL1 *dest, PageTableL1 *src, vaddr_t vaddr);
 static void CopyNPages(PageTableL1 *dest, PageTableL1 *src, vaddr_t vaddr, size_t npages);
-static int AddOneMapping(PageTableL1 *pageTable, vaddr_t vaddr, paddr_t paddr);
+static int AddOneMapping(struct addrspace *as, vaddr_t vaddr, paddr_t *paddr);
 static int SetPageValid(PageTableL1 *pageTable, vaddr_t vaddr, unsigned isValid);
 static int SetPageWritable(PageTableL1 *pageTable, vaddr_t vaddr, unsigned writable);
 static int IsPageValid(PageTableL1 *pageTable, vaddr_t vaddr);
@@ -484,8 +484,12 @@ static void CopyNPages(PageTableL1 *dest, PageTableL1 *src, vaddr_t vaddr, size_
     }
 }
 
-static int AddOneMapping(PageTableL1 *pageTable, vaddr_t vaddr, paddr_t paddr)
+static int AddOneMapping(struct addrspace *as, vaddr_t vaddr, paddr_t *_paddr)
 {
+    PageTableL1 *pageTable = &as->pageTable;
+    assert(_paddr != NULL);
+    
+    paddr_t paddr = *_paddr;
     assert((paddr & 0xfffff000) == paddr);
     assert((vaddr & 0xfffff000) == vaddr);
     
@@ -599,7 +603,7 @@ static int AddNPagesOnVaddr(struct addrspace *as, vaddr_t vaddr, size_t npages)
         paddr = getppages();
         if (paddr == 0)
             return ENOMEM;
-        if (AddOneMapping(pageTable, vaddr + i * PAGE_SIZE, paddr)) {
+        if (AddOneMapping(as, vaddr + i * PAGE_SIZE, &paddr)) {
             return ENOMEM;
         }
         SetPageValid(&as->pageTable, vaddr, 1);
@@ -696,7 +700,7 @@ LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     if (paddr == 0)
         goto fail1;
         
-    result = AddOneMapping(&as->pageTable, vaddr, paddr);
+    result = AddOneMapping(as, vaddr, &paddr);
     if (result) {
         goto fail2;
     } 
@@ -776,7 +780,7 @@ static int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     paddr = getppages();
     if (paddr == 0)
         goto fail1;
-    if (AddOneMapping(&as->pageTable, vaddr, paddr)) {
+    if (AddOneMapping(as, vaddr, &paddr)) {
         goto fail2;
     }
     SetPageValid(&as->pageTable, vaddr, 1);
