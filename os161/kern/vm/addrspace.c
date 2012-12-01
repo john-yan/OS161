@@ -151,7 +151,7 @@ getppages(struct addrspace *as)
         addr = GetNFreePage(1);
         // kprintf("getpages.\n");
         if (addr) 
-            AllocateNPages(as, addr, isKernelPage, nPageToAllocate);
+            AllocateNPages(addr, isKernelPage, nPageToAllocate);
         // CoreMapReport();
         splx(spl);
         if (addr == 0) {
@@ -176,7 +176,7 @@ alloc_kpages(int npages)
 	addr = GetNFreePage(npages);
     // kprintf("getpages.\n");
 	if (addr) 
-        AllocateNPages(NULL, addr, isKernelPage, npages);
+        AllocateNPages(addr, isKernelPage, npages);
     // CoreMapReport();
 	splx(spl);
 	return addr ? PADDR_TO_KVADDR(addr) : 0;

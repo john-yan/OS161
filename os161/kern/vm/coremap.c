@@ -79,13 +79,11 @@ u_int32_t GetNFreePage(u_int32_t nPages)
     return 0;
 }
 
-void AllocateNPages(struct addrspace *as, u_int32_t paddr, u_int32_t isKernelPage, u_int32_t nPages)
+void AllocateNPages(u_int32_t paddr, u_int32_t isKernelPage, u_int32_t nPages)
 {
     assert(((u_int32_t)paddr & 0xfffff000) == paddr);
     if (isKernelPage == 0) {
-        assert(as != NULL);
-    } else {
-        assert(as == NULL);
+        assert(nPages == 1);
     }
     assert(curspl > 0);
     unsigned int i = 0;
@@ -95,10 +93,37 @@ void AllocateNPages(struct addrspace *as, u_int32_t paddr, u_int32_t isKernelPag
         assert(pe[i].isAllocated == 0);
         pe[i].isAllocated = 1;
         pe[i].isKernelPage = isKernelPage;
-        pe[i].ref = as;
+        // pe[i].ref = as;
+        pe[i].as = NULL;
+        pe[i].pte = NULL;
+        pe[i].isLock = 0;
     }
     // kprintf("allocate %d pages(%d).\n",nPages, pages += nPages);
 }
+
+void CoreMapSetAddrSpace(u_int32_t paddr, struct addrspace *as)
+{
+    assert(((u_int32_t)paddr & 0xfffff000) == paddr);
+    assert(curspl > 0);
+    PageEntry* pe = GETPAGEENTRY(paddr);
+    assert(pe->isAllocated == 1);
+    assert(pe->isKernelPage == 0);
+    
+    pe->as = as;
+
+}
+
+void CoreMapSetPTE(u_int32_t paddr, struct _PageTableEntry *pte)
+{
+    assert(((u_int32_t)paddr & 0xfffff000) == paddr);
+    assert(curspl > 0);
+    PageEntry* pe = GETPAGEENTRY(paddr);
+    assert(pe->isAllocated == 1);
+    assert(pe->isKernelPage == 0);
+    
+    pe->pte = pte;
+}
+
 
 void FreeNPages(u_int32_t paddr) 
 {
@@ -133,29 +158,36 @@ int CoreMapReport()
     // kprintf("number of allocated pages = %d\n", numOfAllocPages);
 }
 
+// support swap
+static unsigned current;
 int CoreMapGetPageToSwap(struct addrspace **as, 
             struct _PageTableEntry **pte)
 {
-    // unsigned i = 0;
-    // PageEntry* pe = FIRSTENTRY;
-    // paddr_t paddr;
-    // assert(curspl > 0);
-    // assert(kvaddr != NULL);
+    assert(as != NULL && pte != NULL);
+    unsigned i;
+    PageEntry* pe = FIRSTENTRY;
+    paddr_t paddr;
+    assert(curspl > 0);
     
-    // for (i = 0; i < coremap.totalNumberOfPages; i++) {
-        // if (pe[i].isAllocated == 1 && pe[i].isKernelPage == 0) {
-            // paddr = GETPADDR(&pe[i]);
-            // *kvaddr = PADDR_TO_KVADDR(paddr);
-            // return 0;
-        // }
-    // }
-    // return -1;
+    for (i = current + 1; i < coremap.totalNumberOfPages; i++) {
+        if (pe[i].isAllocated == 1 && pe[i].isKernelPage == 0) {
+            *as = pe[i].as;
+            *pte = pe[i].pte;
+            current = i;
+            return 0;
+        }
+    }
+    for (i = 0; i < current; i++) {
+        if (pe[i].isAllocated == 1 && pe[i].isKernelPage == 0) {
+            *as = pe[i].as;
+            *pte = pe[i].pte;
+            current = i;
+            return 0;
+        }
+    }
+    return -1;
 }
 
-int CoreMapSetPageInfo(struct addrspace *as, PageTableEntry * pte, paddr_t paddr)
-{
-    
-}
 
 
 
