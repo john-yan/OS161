@@ -136,13 +136,12 @@ vm_bootstrap(void)
 
 static
 paddr_t
-getppages(struct addrspace *as)
+getppages()
 {
 	int spl;
 	paddr_t addr = 0;
     const int isKernelPage = 0;
     const int nPageToAllocate = 1;
-    assert(as != NULL);
     
     while (addr == 0) {
         lock_acquire(&vmlock);
@@ -597,7 +596,7 @@ static int AddNPagesOnVaddr(struct addrspace *as, vaddr_t vaddr, size_t npages)
     paddr_t paddr;
     unsigned i;
     for (i = 0; i < npages; i++) {
-        paddr = getppages(as);
+        paddr = getppages();
         if (paddr == 0)
             return ENOMEM;
         if (AddOneMapping(pageTable, vaddr + i * PAGE_SIZE, paddr)) {
@@ -693,7 +692,7 @@ LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     assert(v != NULL);
     
     spl = splhigh();
-    paddr = getppages(as);
+    paddr = getppages();
     if (paddr == 0)
         goto fail1;
         
@@ -774,7 +773,7 @@ static int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     int spl;
     
     spl = splhigh();
-    paddr = getppages(as);
+    paddr = getppages();
     if (paddr == 0)
         goto fail1;
     if (AddOneMapping(&as->pageTable, vaddr, paddr)) {
