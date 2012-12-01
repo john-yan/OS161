@@ -141,7 +141,7 @@ vm_bootstrap(void)
 
 static
 paddr_t
-getppages()
+getppages(struct addrspace *as, PageTableEntry *pte)
 {
 	int spl;
 	paddr_t addr = 0;
@@ -154,8 +154,11 @@ getppages()
         
         addr = GetNFreePage(1);
         // kprintf("getpages.\n");
-        if (addr) 
+        if (addr) {
             AllocateNPages(addr, isKernelPage, nPageToAllocate);
+            CoreMapSetAddrSpace(addr, as);
+            CoreMapSetPTE(addr, pte);
+        }
         // CoreMapReport();
         splx(spl);
         if (addr == 0) {
@@ -523,7 +526,7 @@ static int AddOneMapping(struct addrspace *as, vaddr_t vaddr, paddr_t *_paddr)
     PageTableEntry *pte = &(pageTableL2->pte[pageTableL2Index]);
     assert(pte->valid == 0);
     
-    paddr_t paddr = getppages();
+    paddr_t paddr = getppages(as, pte);
     if (paddr == 0) {
         return ENOMEM;
     }
