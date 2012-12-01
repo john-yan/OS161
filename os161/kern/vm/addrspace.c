@@ -30,10 +30,11 @@ static void CopyOnePage(PageTableL1 *dest, PageTableL1 *src, vaddr_t vaddr);
 static void CopyNPages(PageTableL1 *dest, PageTableL1 *src, vaddr_t vaddr, size_t npages);
 static int AddOneMapping(PageTableL1 *pageTable, vaddr_t vaddr, paddr_t paddr);
 static int SetPageValid(PageTableL1 *pageTable, vaddr_t vaddr, unsigned isValid);
+static int SetPageWritable(PageTableL1 *pageTable, vaddr_t vaddr, unsigned writable);
 static int IsPageValid(PageTableL1 *pageTable, vaddr_t vaddr);
 static int AddNPagesOnVaddr(struct addrspace *as, vaddr_t vaddr, size_t npages);
 static void ReleasePageTable(PageTableL1* pageTable);
-static int GetPhysicalFrame(PageTableL1 *ptl1, vaddr_t vaddr, paddr_t *paddr);
+static int GetPhysicalFrame(PageTableL1 *ptl1, vaddr_t vaddr, paddr_t *paddr, unsigned *permission);
 static int UpdateTLB(vaddr_t vaddr, paddr_t paddr, unsigned permission);
 static int
 LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr);
@@ -227,7 +228,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		return EFAULT;
 	}
 
-    result = GetPhysicalFrame(&as->pageTable, faultaddress, &paddr);
+    result = GetPhysicalFrame(&as->pageTable, faultaddress, &paddr, NULL);
     if (result) {
         // decide which region
         if (IsOnStackRegion(as->stacksize, faultaddress)) {
@@ -239,8 +240,9 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 if (faultaddress >= start && faultaddress < end)
                     break;
             }
-            if (i < 2)
+            if (i < 2) {
                 result = LoadPage(as, faultaddress, &paddr);
+            }
         }
     }
     
@@ -459,10 +461,12 @@ static void CopyOnePage(PageTableL1 *dest, PageTableL1 *src, vaddr_t vaddr)
     assert((vaddr & 0xfffff000) == vaddr);
     
     paddr_t paddrdest, paddrsrc;
-    if (GetPhysicalFrame(dest, vaddr, &paddrdest)) {
+    unsigned permission;
+    
+    if (GetPhysicalFrame(dest, vaddr, &paddrdest, NULL)) {
         panic("copy to invalid page!");
     }
-    if (GetPhysicalFrame(src, vaddr, &paddrsrc)) {
+    if (GetPhysicalFrame(src, vaddr, &paddrsrc, &permission)) {
         panic("copy from invalid page!");
     }
     
@@ -503,8 +507,28 @@ static int AddOneMapping(PageTableL1 *pageTable, vaddr_t vaddr, paddr_t paddr)
     assert(pte->valid == 0);
     
     pte->frameAddr = paddr >> 12;
-    pte->valid = 1;
-    pte->writable = 1;
+    return 0;
+}
+
+static int SetPageWritable(PageTableL1 *pageTable, vaddr_t vaddr, unsigned writable)
+{
+    assert((vaddr & 0xfffff000) == vaddr);
+    
+    vaddr = (unsigned)vaddr >> 12;
+    u_int32_t pageTableL1Index = vaddr >> 10;
+    u_int32_t pageTableL2Index = vaddr & 0x3ff;
+    
+    PageTableL2* pageTableL2 = pageTable->pageTableL2[pageTableL1Index];
+    if (pageTableL2 == NULL) {
+        pageTableL2 = kmalloc(sizeof(PageTableL2));
+        if (pageTableL2 == NULL) {
+            return ENOMEM;
+        }
+        bzero(pageTableL2, sizeof(PageTableL2));
+        pageTable->pageTableL2[pageTableL1Index] = pageTableL2;
+    }
+    PageTableEntry *pte = &(pageTableL2->pte[pageTableL2Index]);
+    pte->writable = writable;
     return 0;
 }
 
@@ -528,6 +552,27 @@ static int SetPageValid(PageTableL1 *pageTable, vaddr_t vaddr, unsigned isValid)
     PageTableEntry *pte = &(pageTableL2->pte[pageTableL2Index]);
     pte->valid = isValid;
     return 0;
+}
+
+static int IsPageWritable(PageTableL1 *pageTable, vaddr_t vaddr)
+{
+    assert((vaddr & 0xfffff000) == vaddr);
+    
+    vaddr = (unsigned)vaddr >> 12;
+    u_int32_t pageTableL1Index = vaddr >> 10;
+    u_int32_t pageTableL2Index = vaddr & 0x3ff;
+    
+    PageTableL2* pageTableL2 = pageTable->pageTableL2[pageTableL1Index];
+    if (pageTableL2 == NULL) {
+        pageTableL2 = kmalloc(sizeof(PageTableL2));
+        if (pageTableL2 == NULL) {
+            return 0;
+        }
+        bzero(pageTableL2, sizeof(PageTableL2));
+        pageTable->pageTableL2[pageTableL1Index] = pageTableL2;
+    }
+    PageTableEntry *pte = &(pageTableL2->pte[pageTableL2Index]);
+    return pte->writable;
 }
 
 static int IsPageValid(PageTableL1 *pageTable, vaddr_t vaddr)
@@ -558,6 +603,8 @@ static int AddNPagesOnVaddr(struct addrspace *as, vaddr_t vaddr, size_t npages)
         if (AddOneMapping(pageTable, vaddr + i * PAGE_SIZE, paddr)) {
             return ENOMEM;
         }
+        SetPageValid(&as->pageTable, vaddr, 1);
+        SetPageWritable(pageTable, vaddr + i * PAGE_SIZE, 1);
     }
     return 0;
 }
@@ -579,7 +626,7 @@ static void ReleasePageTable(PageTableL1* pageTable)
     }
 }
 
-static int GetPhysicalFrame(PageTableL1 *ptl1, vaddr_t vaddr, paddr_t *paddr)
+static int GetPhysicalFrame(PageTableL1 *ptl1, vaddr_t vaddr, paddr_t *paddr, unsigned *permission)
 {
     assert((vaddr & 0xfffff000) == vaddr);
     assert(paddr != NULL);
@@ -597,6 +644,7 @@ static int GetPhysicalFrame(PageTableL1 *ptl1, vaddr_t vaddr, paddr_t *paddr)
         return -1;
     }
     *paddr = pte->frameAddr << 12;
+    if (permission) *permission = *((int*)pte) & 0x00000fff;
     return 0;
 }
 
@@ -648,9 +696,13 @@ LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     paddr = getppages(as);
     if (paddr == 0)
         goto fail1;
-    if (AddOneMapping(&as->pageTable, vaddr, paddr)) {
+        
+    result = AddOneMapping(&as->pageTable, vaddr, paddr);
+    if (result) {
         goto fail2;
-    }
+    } 
+    result = SetPageValid(&as->pageTable, vaddr, 1);
+    assert(result == 0);
     
     bzero((void*)KVADDR_TO_PADDR(paddr), PAGE_SIZE);
     splx(spl);
@@ -665,11 +717,11 @@ LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
                 kprintf("ELF: warning: segment filesize > segment memsize\n");
                 filesize = memsize;
             }
-            vaddr_t startaddr = (userptr_t)(vaddr > p_vaddr ? vaddr : p_vaddr);
+            vaddr_t startaddr = (vaddr > p_vaddr ? vaddr : p_vaddr);
             size_t memLen = PAGE_SIZE - ((~(vaddr_t)PAGE_FRAME) & startaddr);
             off_t offset = p_offset + startaddr - p_vaddr;
             
-            if (filesize + p_offset > offset)
+            if (filesize + p_offset > (unsigned)offset)
                 filesize = filesize + p_offset - offset;
             size_t tranSize = filesize > memLen ? memLen : filesize;
             assert(tranSize <= PAGE_SIZE);
@@ -687,7 +739,8 @@ LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
                 kprintf("ELF: short read on segment - file truncated?\n");
                 return ENOEXEC;
             }
-    
+            result = SetPageWritable(&as->pageTable, vaddr, (as->elf_ph[i].p_flags & PF_W) != 0);
+            assert(result == 0);
         }
     }
     *_paddr = paddr;
@@ -716,6 +769,7 @@ static int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
 {
     assert((vaddr & 0xfffff000) == vaddr);
     
+    const unsigned writable = 1;
     paddr_t paddr;
     int spl;
     
@@ -726,6 +780,8 @@ static int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     if (AddOneMapping(&as->pageTable, vaddr, paddr)) {
         goto fail2;
     }
+    SetPageValid(&as->pageTable, vaddr, 1);
+    SetPageWritable(&as->pageTable, vaddr, writable);
     as->stacksize++;
     
     splx(spl);
