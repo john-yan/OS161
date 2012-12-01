@@ -247,7 +247,8 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		return EFAULT;
 	}
 
-    // assert(lock_do_i_hold(as->lk));
+    assert(!lock_do_i_hold(as->lk));
+    // lock_acquire(&vmlock);
     result = GetPhysicalFrame(as, faultaddress, &paddr, &permission);
     if (result) {
         // decide which region
@@ -656,6 +657,7 @@ static int GetPhysicalFrame(struct addrspace *as, vaddr_t vaddr, paddr_t *paddr,
 {
     assert((vaddr & 0xfffff000) == vaddr);
     assert(paddr != NULL);
+    assert(as != NULL);
     
     vaddr = (unsigned)vaddr >> 12;
     u_int32_t pageTableL1Index = vaddr >> 10;

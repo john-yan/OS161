@@ -67,6 +67,7 @@ struct lock {
 struct lock *lock_create(const char *name);
 void         lock_init(struct lock*);
 void         lock_acquire(struct lock *);
+int          lock_test_and_acquire(struct lock *);
 void         lock_release(struct lock *);
 int          lock_do_i_hold(struct lock *);
 void         lock_destroy(struct lock *);

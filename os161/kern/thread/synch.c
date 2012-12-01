@@ -196,6 +196,28 @@ lock_acquire(struct lock *lock)
     splx(spl);
 }
 
+int lock_test_and_acquire(struct lock * lock)
+{
+    assert(lock != NULL);
+
+    // disable interrupt
+    int spl;
+    spl = splhigh();
+
+    assert(curthread != NULL);
+    if (lock->holdingThread == NULL) {
+        lock->holdingThread = curthread;
+        splx(spl);
+        return 0;
+    } else if (lock->holdingThread != curthread) {
+        splx(spl);
+        return -1;
+    } else {
+        panic("I already hold the lock");
+    }
+    
+}
+
 void
 lock_release(struct lock *lock)
 {
