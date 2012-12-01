@@ -46,6 +46,7 @@ static int noProgress = 0;
 static struct vnode *disk = NULL;
 static struct cv needToEvicPage;
 static struct cv needMorePages;
+static int isInit = 0;
 // static struct semaphore pagesToEvic;
 
 static void swapper(void *o, unsigned long l)
@@ -57,6 +58,7 @@ static void swapper(void *o, unsigned long l)
     int pageInDisk = 0;
     int result = 0;
     int nFreePages = 0;
+    int i;
     
     do {
         lock_acquire(&vmlock);
@@ -75,8 +77,10 @@ static void swapper(void *o, unsigned long l)
         kprintf("put some pages to disk.\n");
         // lock the pagetable and coremap entry
         lock_release(&vmlock);
-        clocksleep(1); // put some pages to disk
-        cv_signal(&needMorePages, &vmlock);
+        // clocksleep(1); // put some pages to disk
+        for (i = 0; i < 10000; i++)
+            thread_yield(); // some delay
+        cv_broadcast(&needMorePages, &vmlock);
         // spl = splhigh();
         // userPage = 0; // get a user page;
         // lock the page
@@ -132,6 +136,7 @@ vm_bootstrap(void)
         panic("Can't create swapper thread.");
     }
     
+    isInit = 0;
 }
 
 static
@@ -178,7 +183,14 @@ alloc_kpages(int npages)
         AllocateNPages(addr, isKernelPage, npages);
     // CoreMapReport();
 	splx(spl);
+    
+    if (isInit) {
+        lock_acquire(&vmlock);
+        cv_signal(&needToEvicPage, &vmlock);
+        lock_release(&vmlock);
+    }
 	return addr ? PADDR_TO_KVADDR(addr) : 0;
+    
 }
 
 void 
@@ -188,6 +200,11 @@ free_kpages(vaddr_t addr)
     FreeNPages(KVADDR_TO_PADDR(addr));
     // CoreMapReport();
 	splx(spl);
+    if (isInit) {
+        lock_acquire(&vmlock);
+        cv_signal(&needMorePages, &vmlock);
+        lock_release(&vmlock);
+    }
 }
 
 int
@@ -488,9 +505,6 @@ static int AddOneMapping(struct addrspace *as, vaddr_t vaddr, paddr_t *_paddr)
 {
     PageTableL1 *pageTable = &as->pageTable;
     assert(_paddr != NULL);
-    
-    paddr_t paddr = *_paddr;
-    assert((paddr & 0xfffff000) == paddr);
     assert((vaddr & 0xfffff000) == vaddr);
     
     vaddr = (unsigned)vaddr >> 12;
@@ -509,7 +523,13 @@ static int AddOneMapping(struct addrspace *as, vaddr_t vaddr, paddr_t *_paddr)
     PageTableEntry *pte = &(pageTableL2->pte[pageTableL2Index]);
     assert(pte->valid == 0);
     
+    paddr_t paddr = getppages();
+    if (paddr == 0) {
+        return ENOMEM;
+    }
+    assert((paddr & 0xfffff000) == paddr);
     pte->frameAddr = paddr >> 12;
+    *_paddr = paddr;
     return 0;
 }
 
@@ -600,9 +620,6 @@ static int AddNPagesOnVaddr(struct addrspace *as, vaddr_t vaddr, size_t npages)
     paddr_t paddr;
     unsigned i;
     for (i = 0; i < npages; i++) {
-        paddr = getppages();
-        if (paddr == 0)
-            return ENOMEM;
         if (AddOneMapping(as, vaddr + i * PAGE_SIZE, &paddr)) {
             return ENOMEM;
         }
@@ -694,21 +711,15 @@ LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     struct uio ku;
     struct vnode *v = as->v;
     assert(v != NULL);
-    
-    spl = splhigh();
-    paddr = getppages();
-    if (paddr == 0)
-        goto fail1;
         
     result = AddOneMapping(as, vaddr, &paddr);
     if (result) {
-        goto fail2;
+        goto fail1;
     } 
     result = SetPageValid(&as->pageTable, vaddr, 1);
     assert(result == 0);
     
     bzero((void*)KVADDR_TO_PADDR(paddr), PAGE_SIZE);
-    splx(spl);
     
     for (i = 0; i < 2; i++) {
         p_vaddr = as->elf_ph[i].p_vaddr;
@@ -749,11 +760,7 @@ LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     *_paddr = paddr;
     return 0;
     
-    
-fail2:
-    FreeNPages(paddr);
 fail1:
-    splx(spl);
     return ENOMEM;
 }
 
@@ -777,11 +784,8 @@ static int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     int spl;
     
     spl = splhigh();
-    paddr = getppages();
-    if (paddr == 0)
-        goto fail1;
     if (AddOneMapping(as, vaddr, &paddr)) {
-        goto fail2;
+        goto fail1;
     }
     SetPageValid(&as->pageTable, vaddr, 1);
     SetPageWritable(&as->pageTable, vaddr, writable);
@@ -793,8 +797,6 @@ static int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     *_paddr = paddr;
     return 0;
     
-fail2:
-    FreeNPages(paddr);
 fail1:
     splx(spl);
     return ENOMEM;
