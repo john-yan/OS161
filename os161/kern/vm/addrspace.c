@@ -69,19 +69,30 @@ static void swapper(void *o, unsigned long l)
         nFreePages = CoreMapReport();
         splx(spl);
         
-        while (nFreePages > 10) {
+        while (nFreePages > 1) {
+            cv_broadcast(&needMorePages, &vmlock);
             cv_wait(&needToEvicPage, &vmlock);
             spl = splhigh();
             nFreePages = CoreMapReport();
             splx(spl);
         }
         
-        kprintf("put some pages to disk.\n");
+        // kprintf("put some pages to disk.\n");
+        spl = splhigh();
+        result = CoreMapGetPageToSwap(&as, &pte);
+        if (!result) {
+            assert(pte->valid == 1);
+            if (pte->writable == 0) {
+                paddr_t paddr = pte->frameAddr << 12;
+                FreeNPages(paddr);
+                pte->valid = 0;
+            }
+        }
+        splx(spl);
         // lock the pagetable and coremap entry
-        clocksleep(1); // put some pages to disk
         cv_broadcast(&needMorePages, &vmlock);
         lock_release(&vmlock);
-        
+        // clocksleep(1);
         // spl = splhigh();
         // userPage = 0; // get a user page;
         // lock the page
@@ -137,7 +148,7 @@ vm_bootstrap(void)
         panic("Can't create swapper thread.");
     }
     
-    isInit = 0;
+    isInit = 1;
 }
 
 static
@@ -148,6 +159,7 @@ getppages(struct addrspace *as, PageTableEntry *pte)
 	paddr_t addr = 0;
     const int isKernelPage = 0;
     const int nPageToAllocate = 1;
+    int pageLeft = 0;
     
     while (addr == 0) {
         // lock_acquire(&vmlock);
@@ -163,13 +175,15 @@ getppages(struct addrspace *as, PageTableEntry *pte)
         } else {
             assert(CoreMapReport() == 0);
         }
-        // CoreMapReport();
+        pageLeft = CoreMapReport();
         
         splx(spl);
         if (addr == 0) {
             cv_signal(&needToEvicPage, &vmlock);
             cv_wait(&needMorePages, &vmlock);
-            kprintf("I hope to have more pages.\n");
+            // kprintf("I hope to have more pages.\n");
+        } else if (pageLeft < 20) {
+            cv_signal(&needToEvicPage, &vmlock);
         }
         // lock_release(&vmlock);
     }
@@ -180,23 +194,57 @@ getppages(struct addrspace *as, PageTableEntry *pte)
 vaddr_t 
 alloc_kpages(int npages)
 {
-	int spl;
-	paddr_t addr;
+    int spl;
+	paddr_t addr = 0;
     const int isKernelPage = 1;
-	spl = splhigh();
+    const int nPageToAllocate = npages;
+    int pageLeft = 0;
     
-	addr = GetNFreePage(npages);
-    // kprintf("getpages.\n");
-	if (addr) 
-        AllocateNPages(addr, isKernelPage, npages);
-    // CoreMapReport();
-	splx(spl);
-    
-    if (isInit) {
-        lock_acquire(&vmlock);
-        cv_signal(&needToEvicPage, &vmlock);
-        lock_release(&vmlock);
+    while (addr == 0) {
+        int hold;
+        if (isInit) {
+            hold = lock_do_i_hold(&vmlock);
+            if (!hold) lock_acquire(&vmlock);
+            assert(lock_do_i_hold(&vmlock));
+        }
+        
+        spl = splhigh();
+        
+        addr = GetNFreePage(nPageToAllocate);
+        // kprintf("getpages.\n");
+        if (addr) {
+            AllocateNPages(addr, isKernelPage, nPageToAllocate);
+        } else {
+            assert(CoreMapReport() == 0);
+        }
+        pageLeft = CoreMapReport();
+        
+        splx(spl);
+        if (addr == 0) {
+            cv_signal(&needToEvicPage, &vmlock);
+            cv_wait(&needMorePages, &vmlock);
+            // kprintf("I hope to have more pages.\n");
+        } else if (pageLeft < 20) {
+            cv_signal(&needToEvicPage, &vmlock);
+        }
+        if (isInit && !hold) lock_release(&vmlock);
     }
+	// int spl;
+	// paddr_t addr;
+    // const int isKernelPage = 1;
+	// spl = splhigh();
+    
+	// addr = GetNFreePage(npages);
+	// if (addr) 
+        // AllocateNPages(addr, isKernelPage, npages);
+	// splx(spl);
+    
+    // if (isInit) {
+        // int hold = lock_do_i_hold(&vmlock);
+        // if (!hold) lock_acquire(&vmlock);
+        // cv_signal(&needToEvicPage, &vmlock);
+        // if (!hold) lock_release(&vmlock);
+    // }
 	return addr ? PADDR_TO_KVADDR(addr) : 0;
     
 }
@@ -209,9 +257,10 @@ free_kpages(vaddr_t addr)
     // CoreMapReport();
 	splx(spl);
     if (isInit) {
-        lock_acquire(&vmlock);
+        int hold = lock_do_i_hold(&vmlock);
+        if (!hold) lock_acquire(&vmlock);
         cv_signal(&needMorePages, &vmlock);
-        lock_release(&vmlock);
+        if (!hold) lock_release(&vmlock);
     }
 }
 

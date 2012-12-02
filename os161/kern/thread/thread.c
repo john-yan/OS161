@@ -18,7 +18,7 @@
 #include <list.h>
 #include <threadqueue.h>
 
-#define MAXALLOWTHREAD 1
+#define MAXALLOWTHREAD 100
 /* States a thread can be in. */
 typedef enum {
 	S_RUN,
@@ -300,12 +300,12 @@ thread_fork(const char *name,
         assert(!lock_do_i_hold(&thMon));
         lock_acquire(&thMon);
         assert(lock_do_i_hold(&thMon));
-        // while (numthreads >= MAXALLOWTHREAD) {
+        while (numthreads >= MAXALLOWTHREAD) {
             // kprintf("fork blocked.\n");
-            // assert(lock_do_i_hold(&thMon));
-            // cv_wait(&thWait, &thMon);
-            // assert(lock_do_i_hold(&thMon));
-        // }
+            assert(lock_do_i_hold(&thMon));
+            cv_wait(&thWait, &thMon);
+            assert(lock_do_i_hold(&thMon));
+        }
     }
 	struct thread *newguy;
 	int s, result;

@@ -159,7 +159,7 @@ int CoreMapReport()
 }
 
 // support swap
-static unsigned current;
+static unsigned current = 0;
 int CoreMapGetPageToSwap(struct addrspace **as, 
             struct _PageTableEntry **pte)
 {
