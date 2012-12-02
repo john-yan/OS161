@@ -353,17 +353,20 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             }
         }
     }
-    lock_release(&vmlock);
+    
     if (result) {
+        lock_release(&vmlock);
         splx(spl);
 		return EFAULT;
     }
 
     result = UpdateTLB(faultaddress, paddr, permission);
     if (result) {
+        lock_release(&vmlock);
         splx(spl);
         return result;
     }
+    lock_release(&vmlock);
 	splx(spl);
 	return 0;
 }
@@ -843,7 +846,7 @@ static int UpdateTLB(vaddr_t vaddr, paddr_t paddr, unsigned permission)
     elo = paddr | permission;
     TLB_Write(ehi, elo, i);
 	splx(spl);
-	return EFAULT;
+	return 0;
 }
 
 static int
