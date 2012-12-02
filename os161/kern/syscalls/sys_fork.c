@@ -14,7 +14,7 @@ void md_forkentry(struct trapframe *tf, unsigned long unused);
 
 int sys_fork(struct trapframe *tf, int* err)
 {
-    int spl = splhigh();
+    
     int ret;
     
     // copy the trapframe
@@ -33,6 +33,7 @@ int sys_fork(struct trapframe *tf, int* err)
 		goto fail1;
 	}
     
+    int spl = splhigh();
     // create a new thread
     struct thread *newth;
     ret = thread_fork("" /* thread name */,
