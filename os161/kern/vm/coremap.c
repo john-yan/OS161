@@ -70,7 +70,7 @@ u_int32_t GetNFreePage(u_int32_t nPages)
         peEnd = peStart;
         while (peEnd < LASTENTRY && ISPAGEFREE(peEnd)) 
             peEnd++;
-        if ((u_int32_t)(peEnd - peStart) > nPages) {
+        if ((u_int32_t)(peEnd - peStart) >= nPages) {
             return GETPADDR(peStart);
         }
         peStart = peEnd;
