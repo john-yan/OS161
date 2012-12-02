@@ -26,8 +26,8 @@
 #include <kern/unistd.h>
 #include <synch.h>
 
-static void CopyOnePage(struct addrspace *destas, struct addrspace *srcas, vaddr_t vaddr);
-static void CopyNPages(struct addrspace *destas, struct addrspace *srcas, vaddr_t vaddr, size_t npages);
+static int CopyOnePage(struct addrspace *destas, struct addrspace *srcas, vaddr_t vaddr);
+static int CopyNPages(struct addrspace *destas, struct addrspace *srcas, vaddr_t vaddr, size_t npages);
 static int AddOneMapping(struct addrspace *as, vaddr_t vaddr, paddr_t *paddr);
 static int SetPageValid(PageTableL1 *pageTable, vaddr_t vaddr, unsigned isValid);
 static int SetPageWritable(PageTableL1 *pageTable, vaddr_t vaddr, unsigned writable);
@@ -78,9 +78,10 @@ static void swapper(void *o, unsigned long l)
         
         kprintf("put some pages to disk.\n");
         // lock the pagetable and coremap entry
-        lock_release(&vmlock);
         clocksleep(1); // put some pages to disk
         cv_broadcast(&needMorePages, &vmlock);
+        lock_release(&vmlock);
+        
         // spl = splhigh();
         // userPage = 0; // get a user page;
         // lock the page
@@ -149,7 +150,8 @@ getppages(struct addrspace *as, PageTableEntry *pte)
     const int nPageToAllocate = 1;
     
     while (addr == 0) {
-        lock_acquire(&vmlock);
+        // lock_acquire(&vmlock);
+        assert(lock_do_i_hold(&vmlock));
         spl = splhigh();
         
         addr = GetNFreePage(1);
@@ -158,15 +160,18 @@ getppages(struct addrspace *as, PageTableEntry *pte)
             AllocateNPages(addr, isKernelPage, nPageToAllocate);
             CoreMapSetAddrSpace(addr, as);
             CoreMapSetPTE(addr, pte);
+        } else {
+            assert(CoreMapReport() == 0);
         }
         // CoreMapReport();
+        
         splx(spl);
         if (addr == 0) {
             cv_signal(&needToEvicPage, &vmlock);
             cv_wait(&needMorePages, &vmlock);
             kprintf("I hope to have more pages.\n");
         }
-        lock_release(&vmlock);
+        // lock_release(&vmlock);
     }
 	return addr;
 }
@@ -248,7 +253,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	}
 
     assert(!lock_do_i_hold(as->lk));
-    // lock_acquire(&vmlock);
+    lock_acquire(&vmlock);
     result = GetPhysicalFrame(as, faultaddress, &paddr, &permission);
     if (result) {
         // decide which region
@@ -267,7 +272,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             }
         }
     }
-    
+    lock_release(&vmlock);
     if (result) {
         splx(spl);
 		return EFAULT;
@@ -431,31 +436,39 @@ int
 as_copy(struct addrspace *old, struct addrspace **ret)
 {
 	struct addrspace *new;
-    int i;
-    
+    int i, result;
+
 	new = as_create();
 	if (new==NULL) {
 		return ENOMEM;
 	}
-
+    
+    lock_acquire(&vmlock);
     for (i = 0; i < 2; i++) {
         new->region[i] = old->region[i];
         new->elf_ph[i] = old->elf_ph[i];
     }
     new->stacksize = old->stacksize;
     new->v = old->v;
-    VOP_INCREF(new->v);
+    VOP_INCREF(old->v);
     
-	if (AddNPagesOnVaddr(new, 
-            USERTOP - old->stacksize * PAGE_SIZE,
-            old->stacksize)) {
-		as_destroy(new);
-		return ENOMEM;
-	}
+	// if (AddNPagesOnVaddr(new, 
+            // USERTOP - old->stacksize * PAGE_SIZE,
+            // old->stacksize)) {
+        // lock_release(&vmlock);
+		// as_destroy(new);
+		// return ENOMEM;
+	// }
 
-    CopyNPages(new, old, 
+    result = CopyNPages(new, old, 
         USERTOP - old->stacksize * PAGE_SIZE, old->stacksize);
 	
+    if (result) {
+        lock_release(&vmlock);
+        as_destroy(new);
+        return result;
+    }
+    lock_release(&vmlock);
 	*ret = new;
 	return 0;
 }
@@ -478,34 +491,56 @@ int as_release(struct addrspace *as)
     return 0;
 }
 
-static void CopyOnePage(struct addrspace *destas, struct addrspace *srcas, vaddr_t vaddr)
+static int CopyOnePage(struct addrspace *destas, struct addrspace *srcas, vaddr_t vaddr)
 {
     assert((vaddr & 0xfffff000) == vaddr);
+    assert(lock_do_i_hold(&vmlock));
     
     paddr_t paddrdest, paddrsrc;
     unsigned permission;
-    // PageTableL1 *dest = &destas->pageTable;
-    // PageTableL1 *src = &srcas->pageTable;
-    if (GetPhysicalFrame(destas, vaddr, &paddrdest, NULL)) {
-        panic("copy to invalid page!");
+    int result = 0;
+    
+    char *ktemp = alloc_kpages(1);
+    if (ktemp == 0) {
+        return ENOMEM;
     }
+    
     if (GetPhysicalFrame(srcas, vaddr, &paddrsrc, &permission)) {
         panic("copy from invalid page!");
     }
     
-    vaddr_t kvaddrdest = PADDR_TO_KVADDR(paddrdest);
     vaddr_t kvaddrsrc = PADDR_TO_KVADDR(paddrsrc);
-    memmove((void *)kvaddrdest, (const void *)kvaddrsrc, PAGE_SIZE);
+    memmove((void *)ktemp, (const void *)kvaddrsrc, PAGE_SIZE);
+    
+    if (GetPhysicalFrame(destas, vaddr, &paddrdest, NULL)) {
+        result = AddOneMapping(destas, vaddr, &paddrdest);
+        if (result) {
+            free_kpages(ktemp);
+            return result;
+        }
+        SetPageValid(&destas->pageTable, vaddr, 1);
+        SetPageWritable(&destas->pageTable, vaddr, (permission & TLBLO_DIRTY) != 0);
+    }
+    
+    vaddr_t kvaddrdest = PADDR_TO_KVADDR(paddrdest);
+    memmove((void *)kvaddrdest, (const void *)ktemp, PAGE_SIZE);
+    free_kpages(ktemp);
+    return 0;
 }
 
-static void CopyNPages(struct addrspace *destas, struct addrspace *srcas, vaddr_t vaddr, size_t npages)
+static int CopyNPages(struct addrspace *destas, struct addrspace *srcas, vaddr_t vaddr, size_t npages)
 {
     assert((vaddr & 0xfffff000) == vaddr);
+    assert(lock_do_i_hold(&vmlock));
+    int result;
     
     unsigned i;
     for (i = 0; i < npages; i++) {
-        CopyOnePage(destas, srcas, vaddr + i * PAGE_SIZE);
+        result = CopyOnePage(destas, srcas, vaddr + i * PAGE_SIZE);
+        if (result)
+            return result;
     }
+    return 0;
 }
 
 static int AddOneMapping(struct addrspace *as, vaddr_t vaddr, paddr_t *_paddr)
@@ -513,6 +548,7 @@ static int AddOneMapping(struct addrspace *as, vaddr_t vaddr, paddr_t *_paddr)
     PageTableL1 *pageTable = &as->pageTable;
     assert(_paddr != NULL);
     assert((vaddr & 0xfffff000) == vaddr);
+    assert(lock_do_i_hold(&vmlock));
     
     vaddr = (unsigned)vaddr >> 12;
     u_int32_t pageTableL1Index = vaddr >> 10;
@@ -626,6 +662,8 @@ static int AddNPagesOnVaddr(struct addrspace *as, vaddr_t vaddr, size_t npages)
     PageTableL1 *pageTable = &as->pageTable;
     paddr_t paddr;
     unsigned i;
+    assert(lock_do_i_hold(&vmlock));
+    
     for (i = 0; i < npages; i++) {
         if (AddOneMapping(as, vaddr + i * PAGE_SIZE, &paddr)) {
             return ENOMEM;
@@ -724,7 +762,8 @@ LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr, unsigned *permiss
     struct uio ku;
     struct vnode *v = as->v;
     assert(v != NULL);
-        
+    assert(lock_do_i_hold(&vmlock));
+    
     result = AddOneMapping(as, vaddr, &paddr);
     if (result) {
         goto fail1;
@@ -796,6 +835,7 @@ static int IsOnStackRegion(size_t stacksize, vaddr_t vaddr)
 static int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
 {
     assert((vaddr & 0xfffff000) == vaddr);
+    assert(lock_do_i_hold(&vmlock));
     
     const unsigned writable = 1;
     paddr_t paddr;
