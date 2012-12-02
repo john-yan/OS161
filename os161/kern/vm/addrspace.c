@@ -25,6 +25,10 @@
 #include <vfs.h>
 #include <kern/unistd.h>
 #include <synch.h>
+#include <bitmap.h>
+#define SECTORS 10240
+#define BYTESPERSECTOR 512
+#define DISKSPACE (SECTORS * BYTESPERSECTOR)
 
 static int CopyOnePage(struct addrspace *destas, struct addrspace *srcas, vaddr_t vaddr);
 static int CopyNPages(struct addrspace *destas, struct addrspace *srcas, vaddr_t vaddr, size_t npages);
@@ -43,11 +47,12 @@ static int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr);
 
 static struct lock vmlock;
 static int noProgress = 0;
-static struct vnode *disk = NULL;
+static struct vnode *disk[2] = {NULL, NULL};
 static struct cv needToEvicPage;
 static struct cv needMorePages;
 static int isInit = 0;
-static int nextEmptySpace = 0;
+// static int nextEmptySpace = 0;
+static struct bitmap *diskmap = NULL;
 // static struct semaphore pagesToEvic;
 
 static u_int32_t ToDisk(vaddr_t vaddr)
@@ -57,31 +62,63 @@ static u_int32_t ToDisk(vaddr_t vaddr)
     
     struct uio ku;
     int result;
-    u_int32_t loc = nextEmptySpace;
-    nextEmptySpace += PAGE_SIZE;
+    u_int32_t bitmaploc, diskloc, diskindex, flatloc;
+    result = bitmap_alloc(diskmap, &bitmaploc);
     
-    mk_kuio(&ku, (void*)vaddr , PAGE_SIZE, loc, UIO_WRITE);
-    result = VOP_WRITE(disk, &ku);
+    if (result) {
+        panic("no disk space.");
+    }
+    
+    flatloc = bitmaploc * PAGE_SIZE;
+    diskindex = flatloc / DISKSPACE;
+    diskloc = flatloc - diskindex * DISKSPACE;
+    
+    mk_kuio(&ku, (void*)vaddr , PAGE_SIZE, diskloc, UIO_WRITE);
+    result = VOP_WRITE(disk[diskindex], &ku);
     if (result) {
         panic(strerror(result));
     }
-    return loc;
+    return flatloc;
 }
 
-static int ToMem(u_int32_t loc, vaddr_t vaddr)
+static int ToMem(u_int32_t flatloc, vaddr_t vaddr)
 {
     assert(lock_do_i_hold(&vmlock));
     assert((vaddr & 0xfffff000) == vaddr);
+    assert((flatloc & 0xfffff000) == flatloc);
     
     struct uio ku;
     int result;
+    u_int32_t bitmaploc, diskloc, diskindex;
+    bitmaploc = flatloc/PAGE_SIZE;
     
-    mk_kuio(&ku, (void*)vaddr , PAGE_SIZE, loc, UIO_READ);
-    result = VOP_READ(disk, &ku);
+    assert (bitmap_isset(diskmap, bitmaploc));
+    
+    diskindex = flatloc / DISKSPACE;
+    diskloc = flatloc - diskindex * DISKSPACE;
+    
+    mk_kuio(&ku, (void*)vaddr , PAGE_SIZE, diskloc, UIO_READ);
+    result = VOP_READ(disk[diskindex], &ku);
     if (result) {
         panic(strerror(result));
     }
+    
+    bitmap_unmark(diskmap, bitmaploc);
     return result;
+}
+
+static int DiskClear(u_int32_t flatloc)
+{
+    assert(lock_do_i_hold(&vmlock));
+    assert((flatloc & 0xfffff000) == flatloc);
+    
+    u_int32_t bitmaploc;
+    bitmaploc = flatloc/PAGE_SIZE;
+    
+    assert (bitmap_isset(diskmap, bitmaploc));
+    
+    bitmap_unmark(diskmap, bitmaploc);
+    return 0;
 }
 
 static void swapper(void *o, unsigned long l)
@@ -146,34 +183,22 @@ vm_bootstrap(void)
     struct uio ku;
     lock_init(&vmlock);
     cv_init(&needToEvicPage);
-    // sem_init(&pagesToEvic, 0);
     cv_init(&needMorePages);
-    // char *p = alloc_kpages(1);
-    // bzero(p, PAGE_SIZE);
-    // strcpy(p, "hello world.");
+    diskmap = bitmap_create(DISKSPACE * 2 / PAGE_SIZE);
     
-    result = vfs_open("lhd0raw:", O_RDWR, &disk);
+    if (diskmap == NULL) {
+        panic("can't create disk map.");
+    }
+    
+    result = vfs_open("lhd0raw:", O_RDWR, &disk[0]);
     if (result) {
         panic("Can't Open swap device.");
     }
     
-    // mk_kuio(&ku, p , PAGE_SIZE, 0, UIO_WRITE);
-    // result = VOP_WRITE(disk, &ku);
-    // if (result) {
-        // panic(strerror(result));
-    // }
-    
-    // bzero(p, PAGE_SIZE);
-    
-    // mk_kuio(&ku, p , PAGE_SIZE, 0, UIO_READ);
-    // result = VOP_READ(disk, &ku);
-    // if (result) {
-        // panic(strerror(result));
-    // }
-    
-    // if (strcmp(p, "hello world.")) {
-        // panic("not match.");
-    // }
+    result = vfs_open("lhd1raw:", O_RDWR, &disk[1]);
+    if (result) {
+        panic("Can't Open swap device.");
+    }
     
     result = thread_fork("swapper", NULL, 0, swapper, NULL);
     if (result) {
@@ -772,6 +797,12 @@ static void ReleasePageTable(PageTableL1* pageTable)
             for (j = 0; j < 1024; j++) {
                 if (ptl2->pte[j].valid == 1) {
                     FreeNPages ((ptl2->pte[j].frameAddr) << 12);
+                    ptl2->pte[j].valid = 0;
+                } else if (ptl2->pte[j].swapped == 1) {
+                    u_int32_t loc = (ptl2->pte[j].frameAddr) << 12;
+                    DiskClear(loc);
+                    ptl2->pte[j].swapped = 0;
+                    
                 }
             }
             kfree(ptl2);
