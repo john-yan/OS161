@@ -44,6 +44,8 @@ all depend tags clean install:
 	(cd forkexecbomb && $(MAKE) $@)
 	(cd stacktest && $(MAKE) $@)
 	(cd printchar && $(MAKE) $@)
+	(cd bigprog && $(MAKE) $@)
+	(cd triplebigprog && $(MAKE) $@)
 	(cd readchar && $(MAKE) $@)
 	(cd forksimtest && $(MAKE) $@)
 	(cd exittest && $(MAKE) $@)
