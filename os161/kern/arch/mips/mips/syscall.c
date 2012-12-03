@@ -49,7 +49,7 @@ void
 mips_syscall(struct trapframe *tf)
 {
 	int callno;
-	int32_t retval;
+	int retval;
 	int err;
 
 	assert(curspl==0);
@@ -101,6 +101,18 @@ mips_syscall(struct trapframe *tf)
             int *status = (int*)tf->tf_a1;
             int option = tf->tf_a2;
             retval = sys_waitpid(pid, status, option);
+            break;
+        case SYS_sbrk:
+            err = 0;
+            int bytes = (int)tf->tf_a0;
+            if (bytes >= 0) {
+                retval = sys_sbrk(bytes);
+                if (retval == -1)
+                    err = ENOMEM;
+            } else {
+                err = EINVAL;
+            }
+            
             break;
 	    /* Add stuff here */
  

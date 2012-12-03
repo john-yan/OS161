@@ -44,6 +44,7 @@ static int
 LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr, unsigned *permission);
 static int IsOnStackRegion(size_t stacksize, vaddr_t vaddr);
 static int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr);
+static int AllocateHeap(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr);
 
 static struct lock vmlock;
 static int noProgress = 0;
@@ -366,6 +367,10 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         if (IsOnStackRegion(as->stacksize, faultaddress)) {
             result = IncreaseStack(as, faultaddress, &paddr);
             permission = TLBLO_DIRTY | TLBLO_VALID;
+        } else if (faultaddress >= as->heapstart 
+            && faultaddress < as->heapstart + as->heapsize) {
+            result = AllocateHeap(as, faultaddress, &paddr);
+            permission = TLBLO_DIRTY | TLBLO_VALID;
         } else {
             for (i = 0; i < 2; i++) {
                 vaddr_t start = as->region[i].regionBase << 12;
@@ -476,6 +481,8 @@ as_define_eh(struct addrspace *as, struct vnode *v, Elf_Ehdr* eh)
     assert(as->v == NULL);
     as->v = v;
     VOP_INCREF(v);
+    u_int32_t heapstart = 0;
+    
     for (i=0; i<eh->e_phnum; i++) {
         
 		off_t offset = eh->e_phoff + i*eh->e_phentsize;
@@ -516,10 +523,35 @@ as_define_eh(struct addrspace *as, struct vnode *v, Elf_Ehdr* eh)
         as->region[phi].nPages = sz >> 12;
         as->region[phi].regionBase = (elf_ph.p_vaddr & PAGE_FRAME) >> 12;
         
+        if (heapstart < (elf_ph.p_vaddr & PAGE_FRAME) + sz) {
+            heapstart = (elf_ph.p_vaddr & PAGE_FRAME) + sz;
+        }
+        
         phi++;
 	}
     
+    assert((heapstart & PAGE_FRAME) == heapstart);
+    as->heapstart = heapstart;
+    as->heapsize = 0;
+    
     return 0;
+}
+
+int as_heap(struct addrspace *as, int bytes)
+{
+    assert(as != NULL);
+    assert(bytes >= 0);
+    
+    
+    u_int32_t oldheap = as->heapsize + as->heapstart;
+    u_int32_t newsize = as->heapsize + (unsigned)bytes;
+    
+    if (newsize > 5242880) {
+        return -1;
+    }
+    
+    as->heapsize = newsize;
+    return oldheap;
 }
 
 int
@@ -995,6 +1027,43 @@ fail1:
     splx(spl);
     return ENOMEM;
 }
+
+static int AllocateHeap(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
+{
+    assert((vaddr & 0xfffff000) == vaddr);
+    assert(lock_do_i_hold(&vmlock));
+    const unsigned writable = 1;
+    paddr_t paddr;
+    int spl;
+    
+    spl = splhigh();
+    if (AddOneMapping(as, vaddr, &paddr)) {
+        goto fail1;
+    }
+    SetPageValid(&as->pageTable, vaddr, 1);
+    SetPageWritable(&as->pageTable, vaddr, writable);
+    
+    splx(spl);
+    bzero((void*)KVADDR_TO_PADDR(paddr), PAGE_SIZE);
+    
+    *_paddr = paddr;
+    return 0;
+    
+fail1:
+    splx(spl);
+    return ENOMEM;
+    
+}
+
+
+
+
+
+
+
+
+
+
 
 
 

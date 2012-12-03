@@ -48,8 +48,9 @@ struct addrspace {
     struct vnode *v;
 	Elf_Phdr elf_ph[2];
     Region region[2];
-	Region heap;
     
+    u_int32_t heapstart;
+    size_t heapsize;
     size_t stacksize;
     
 	PageTableL1 pageTable;
@@ -101,6 +102,8 @@ int		  as_complete_load(struct addrspace *as);
 int               as_define_stack(struct addrspace *as, vaddr_t *initstackptr);
 int as_hold(struct addrspace *as);
 int as_release(struct addrspace *as);
+int as_heap(struct addrspace *as, int bytes);
+
 /*
  * Functions in loadelf.c
  *    load_elf - load an ELF user program executable into the current

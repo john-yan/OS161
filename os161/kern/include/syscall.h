@@ -11,5 +11,6 @@ int sys_getpid();
 int sys_reboot(int code);
 int sys_fork(struct trapframe *tf, int* err);
 int sys_execv(struct trapframe *tf, int* err);
+int sys_sbrk(int bytes);
 
 #endif /* _SYSCALL_H_ */
