@@ -994,10 +994,19 @@ static int IsOnStackRegion(size_t stacksize, vaddr_t vaddr)
     vaddr_t start = USERSTACK - stacksize * PAGE_SIZE;
     vaddr_t end = USERSTACK;
     
-    if (vaddr < end && vaddr >= (start - PAGE_SIZE))
+    if (vaddr < end && vaddr >= start) {
         return 1;
-    else
+    }
+    
+    if (end - start == 0x500000) {
         return 0;
+    }
+    
+    if (vaddr < end && vaddr >= (start - PAGE_SIZE)){
+        return 1;
+    }
+        
+    return 0;
 }
 
 static int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
