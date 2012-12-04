@@ -1,0 +1,71 @@
+﻿HOW WE APPROACH///////////////////////////////////////////////////////////////////////////
+
+Before we actually start this lab, our team understands that one has to consider and design the implementation first before we actually solve the problem. When it comes to this lab's design, we come up with several questions. We believe that the team needs to deeply look at these questions before we start. The team decided to list these questions below:
+
+synchronization
+The first that came to our mind was the question that how the synchronization look like in this lab. Since we have done the previous lab, we noticed the importance of designing synchronization approaches before we start the lab. This will ensure that we are invulnerable to some really bad bugs that are extremely hard to detect since the nature of synchronization. We discussed together and here is what we thought important synchronization problems: Synchronization of Core Map, Page Table, and Swap Handler.
+
+interfaces
+We know that we need to implement a Core Map, Page Table, Address Space Structure, but what interfaces (public functions we need) should be designed first. After reading the Lab 3 handout, Lecture Slides, and Piazza answers we know that we need to have several public functions that are listed in implementation parts.
+
+Then, we started our lab. We finished Core Map very soon and smooth almost without any errors. We then tried to work out the Paging part with the same manner, but it turned out that this part was much harder than Core Map. We first carefully examined and programed the Page Table Interfaces as described in implementation section. However, we cannot test our code before TLB fault handler was implemented. Therefore, we had to implement TLB fault handler (vm_fault) without debugging, this brought a bunch of tricky bugs. One critical bug was the recursive call of TLB handler. We added DEBUG() function everywhere, and tried to understand how TLB fault handler actually work, and we also read FAQ section of this lab. After we had a deep understanding of the problem we found that the problem should divided into two parts. First is that we used load_segment function which will take a proccess’s virtual address as a parameter. However, in order to load the segment into the physical memory load_segment will ask TLB fault handler for help. While previous TLB fault handler knows what the physical address by a simple math conversion, TLB fault handler now will not know it until it calls load_segment to allocate that page, then it will be recursively switched between these to functions. The other part was that even we had a correct TLB handler we needed to understand that TLB handler will still be called upon the same address very soon since that the operating system’s scheduler will do a context switch in every short interval and that it will empty the TLB each time it is called. It may give us an illusion that it is a bug. 
+
+Then we started to deal with sbrk() system call. Our team made a mistake to fail to fully understand the problem before we started it. We had much confusion about how we make an unaligned sbrk amount. After struggling with it for one night we found the point on Piazza’s thread. It said that we need to keep the heap top value, and for each sbrk change it accordingly but only change the actual page number after heaptop is higher or lower than current page’s bound. With that crucial point we finally passed first 4 malloctest in testbin folder.
+
+After finishing this we modified as_copy and vm_fualt handler to make our system support copy-on-write when fork or execv were called using memmove. 
+
+Then, we start the final part of the assignment, which is swapping. We found that this part is extremely harder than what we thought when started the lab. In order to solve the part, we decided to reconsider our page table permissions bits and synchronization primitives, which will be also be described in detail on the next section.
+
+
+IMPLEMENTATION DECRIPTIONS//////////////////////////////////////////////////////////
+
+structures interfaces
+As discussed on HOW WE APPROACH section we designed our interfaces of the three structures as fallows:
+
+core map interfaces
+1. coremap_create():		create a coremap structure according to ram_getsize and the structure’s size it self.
+2. coremap_alloc_ppages():	mark pages to allocated, mark associated access control values, and record how many pages allocated at the same time (for coremap_free_ppages).
+3. coremap_free_ppages():	mark pages to !allocated and empty its access values
+4. coremap_destroy():		mark everything to zeros.
+
+page table interfaces
+1. pagetable_create():		create a page table for specified region and size but not allocate actual memory for each page.
+2. pagetable_destroy():		free every page table entry’s memory, evicted pages and destroy its self.
+3. pagetable_copy():		deep copy of every page table entry but share the same physical address. (For copy on write later on)
+
+ADDRESS SPACE INTERFACES
+1.  as_create():			create the address space structure without allocate it pagetable.
+2.  as_destroy():		destroy page table for every region(text, data, heap, stack).
+3.  as_copy():			copy every region of one address space to another address space.
+4.  as_define_region(): create the region specified with size specified and record the regions important perameters (struct vnode*, off_t ).
+5.  as_activate():		Mark all TLB entry to zero.
+
+
+synchronizations
+1. Synchronization of Core Map Structure:
+
+Core Map Structure is the structure that we will implement to record every frame’ status (allocated, writeable, and etc.) after vm_bootstrap was called. Since this structure is for each physical memory, it is unique and shared across all memory allocation methods after vm_bootstrap gets called. Therefore it should be atomic. We need to implement a synchronization method that will give it atomic nature.
+
+After a short discussion, we found that the lock will best choice among the rest of implementations we learned (semaphore, interrupt disable, etc.) This is because that for lock, it will ensure that only one thread at a time can access the core map either a coremap_alloc_ppages or coremap_free_ppages. But for semaphore, for example, it can allow more threads access the shared structure if we did not implement it as desired. Therefore it will be more likely to introduce a “hard-to-dectect” bug. In conclusion, our team will implement lock on every coremap public interface that will not call another side it implementation. (If it happens, a thread will acquire a lock twice, which causes a deadlock!)
+
+2. Synchronization of Page Table Structure:
+
+Page Table Structure is definitely a part that requires a synchronization strategy since our os161 can run multiple processes at the same time. When thinking about the private page table structure of each process we know that it is separate from the other process but one may ask why we need an atomic access of the page table structures of each process. When we deeply went through it, we found that although the page table structures are not share with each other, when fork() system call is invoked, child thread needs to read from its parent page table structure, but at the same time it is possible for the parent thread to have a write access to the same structure (say a sbrk() to change a heap break value) 
+
+Therefore, our solution is to use an interrupt disable between as_copy() function. This will allow fork() happens atomically. Compare to lock, it will get called when as_copy is invoked, while lock will need be acquired each time between each page table access.
+
+3. Synchronization of Swap handler
+Swap handler will need synchronization primitive is due to the shared disk. When each time we access the disk we need to make sure that disk content will not be changed by other thread during a whole session of access. This will definitely cause synchronization problem. Therefore, we decided to add a synchronization method inside the handler. Since there will be a disk access, therefore to simply disable interrupt before disk access is not a good choice. We need to implement a lock for the disk. 
+
+Here we have two choices to do. First, we can allocate a lock per user program. Or, we can allocate a lock uniquely for the disk. The first choice will make the system faster because multiple threads with different program names can access the disk, while the second one will be slower. However we decided to use the second choice because when execv() gets invoked, we have to change the lock while we clean the evicted pages, this is possible but more likely to involve several bugs, which we do not want. Therefore we choose the second choice.
+
+
+implementation of TLB fault handler
+Our team will need to design a TLB fault handler, which needs to support paging on demand and swapping to disk. This is the most important part of this lab. 
+
+For paging on demand we did the following modifications. The previous implementation of paging is that it will create all the pages at once. This is not efficient. This is because several reasons. First maximum stack top is fixed. This is very bad, as the stack growing larger and larger. Therefore, when stack because large we need to increase the stack top as needed. The other reason is that when we are running a program, we do not need to all the memory the program has. Instead of allocate of the memory, we, instead, only allocate one required page where a TLB fault happened. On TLB fault, we need first to find whether it is a valid fault region with valid permissions. If it is not in an allocated page table area but everything else if valid, we need to then allocate a page and use VOP_READ to read the content of the page inside that area. However, we need to implement stack and heap area differently than that. If it is a stack area, we need to another step, if it is above the stack top. That is, we need to check if it is in just one page above the stack. If it is, that is also valid since the stack can grow. However, we also need to make sure that virtual addresses of the stack and heap are not overlapped with each other. For the heap area, we also need to have a slightly different implementation. The heap area grows when sbrk gets called, also we need to increase the heap top at sbrk system call. When sbrk gets called it will provide the user program's requests to increment the top of heap. We first need to align this perimeter to ensure that we allocate memory in the unit of page. But however, we also need to save the unaligned page in side a the page table structure to let provide the return value.
+
+core map structures we use
+We created and modified a lot of structures in this lab in order to provide a desire paging on demand functionality. We first need to have Core Map structure that will hold each state of frame for the actual physical memory. We have several alternatives for this implementation. The first alternatives is to use linked list structure. A linked list structures is harder to implement than array or an inverted page table format. Therefore, it is not desired. This may introduce more potential bugs than other implementations and also slower than the rest since you have to reverse every node of the list to get a desire space. The other implementation is to use inverted hash table. This is the best in terms of performance, but hard to implement for a short time. Therefore, we chose to use array instead, since the library has already provided us with a good dynamic array implementation, which we can use directly. 
+
+
