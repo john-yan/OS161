@@ -937,7 +937,7 @@ LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr, unsigned *permiss
     result = SetPageValid(&as->pageTable, vaddr, 1);
     assert(result == 0);
     
-    bzero((void*)KVADDR_TO_PADDR(paddr), PAGE_SIZE);
+    bzero((void*)PADDR_TO_KVADDR(paddr), PAGE_SIZE);
     
     for (i = 0; i < 2; i++) {
         p_vaddr = as->elf_ph[i].p_vaddr;
@@ -958,7 +958,7 @@ LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr, unsigned *permiss
             size_t tranSize = filesize > memLen ? memLen : filesize;
             assert(tranSize <= PAGE_SIZE);
             
-            vaddr_t kstartaddr = KVADDR_TO_PADDR(paddr + startaddr - vaddr);
+            vaddr_t kstartaddr = PADDR_TO_KVADDR(paddr + startaddr - vaddr);
             mk_kuio(&ku, kstartaddr, tranSize, offset, UIO_READ);
             
             result = VOP_READ(v, &ku);
@@ -1027,7 +1027,7 @@ static int IncreaseStack(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     as->stacksize++;
     
     splx(spl);
-    bzero((void*)KVADDR_TO_PADDR(paddr), PAGE_SIZE);
+    bzero((void*)PADDR_TO_KVADDR(paddr), PAGE_SIZE);
     
     *_paddr = paddr;
     return 0;
@@ -1053,7 +1053,7 @@ static int AllocateHeap(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr)
     SetPageWritable(&as->pageTable, vaddr, writable);
     
     splx(spl);
-    bzero((void*)KVADDR_TO_PADDR(paddr), PAGE_SIZE);
+    bzero((void*) PADDR_TO_KVADDR(paddr), PAGE_SIZE);
     
     *_paddr = paddr;
     return 0;
