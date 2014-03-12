@@ -337,13 +337,13 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	DEBUG(DB_VM, "dumbvm: fault: 0x%x\n", faultaddress);
 
 	switch (faulttype) {
-	    case VM_FAULT_READONLY:
+	    
 		/* We always create pages read-write, so we can't get this */
-		panic("dumbvm: got VM_FAULT_READONLY\n");
 	    case VM_FAULT_READ:
 	    case VM_FAULT_WRITE:
 		break;
-	    default:
+	    case VM_FAULT_READONLY:
+        default:
 		splx(spl);
 		return EINVAL;
 	}
@@ -944,13 +944,13 @@ LoadPage(struct addrspace* as, vaddr_t vaddr, paddr_t *_paddr, unsigned *permiss
         p_offset = as->elf_ph[i].p_offset;
         filesize = as->elf_ph[i].p_filesz;
         memsize = as->elf_ph[i].p_memsz;
-        if (vaddr >= p_vaddr && vaddr < p_vaddr + memsize) {
+        if (vaddr >= p_vaddr && vaddr < p_vaddr + memsize) { // if the vaddr is lied within this segment
             if (filesize > memsize) {
                 kprintf("ELF: warning: segment filesize > segment memsize\n");
                 filesize = memsize;
             }
-            vaddr_t startaddr = (vaddr > p_vaddr ? vaddr : p_vaddr);
-            size_t memLen = PAGE_SIZE - ((~(vaddr_t)PAGE_FRAME) & startaddr);
+            vaddr_t startaddr = vaddr; (vaddr > p_vaddr ? vaddr : p_vaddr);
+            size_t memLen = PAGE_SIZE /* - ((~(vaddr_t)PAGE_FRAME) & startaddr) */;
             off_t offset = p_offset + startaddr - p_vaddr;
             
             if (filesize + p_offset > (unsigned)offset)
